@@ -3,7 +3,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QFormLayout,
                             QTableWidgetItem, QHeaderView, QProgressBar,
                             QMenu, QAction)
 from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor # Import QColor
+from PyQt5.QtGui import QColor, QPainter # Import QPainter
 import datetime
 import math # Import math module
 
@@ -15,6 +15,94 @@ def _format_bytes(size_bytes):
     p = math.pow(1024, i) # Use math.pow
     s = round(size_bytes / p, 2)
     return f"{s} {size_name[i]}"
+
+class FilesTableWidget(QTableWidget): # Create a dedicated class for FilesTable
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setColumnCount(5)
+        self.setHorizontalHeaderLabels(["Path", "Size", "Progress", "Downloaded", "Priority"])
+        self.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.setSelectionBehavior(QTableWidget.SelectRows)
+        self.verticalHeader().setVisible(False)
+        self.setContextMenuPolicy(Qt.CustomContextMenu) # Context menu connection will be in TorrentDetailWidget
+
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Stretch) # Path
+        header.setSectionResizeMode(1, QHeaderView.Interactive) # Size
+        header.setSectionResizeMode(2, QHeaderView.Stretch) # Progress
+        header.setSectionResizeMode(3, QHeaderView.Interactive) # Downloaded
+        header.setSectionResizeMode(4, QHeaderView.Interactive) # Priority
+
+        self.setColumnWidth(1, 100) # Size
+        self.setColumnWidth(3, 100) # Downloaded
+        self.setColumnWidth(4, 100) # Priority
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.rowCount() == 0:
+            painter = QPainter(self.viewport())
+            painter.save()
+            font = self.font()
+            font.setPointSize(11) # Slightly smaller for detail view
+            painter.setFont(font)
+            text_color = QColor("#888888")
+            painter.setPen(text_color)
+            # Determine if metadata is still loading vs. genuinely no files
+            # This might need a flag from TorrentDetailWidget or status_dict
+            # if self.parentWidget() and hasattr(self.parentWidget(), '_current_info_hash') and not self.parentWidget()._current_info_hash:
+            #     placeholder_text = "Select a torrent to view files."
+            # elif self.parentWidget() and hasattr(self.parentWidget(), 'is_metadata_loading') and self.parentWidget().is_metadata_loading:
+            #     placeholder_text = "Fetching file information..."
+            placeholder_text = "No files in torrent or metadata not yet received."
+            painter.drawText(self.viewport().rect(), Qt.AlignCenter, placeholder_text)
+            painter.restore()
+
+class PeersTableWidget(QTableWidget): # Create a dedicated class for PeersTable
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setColumnCount(9) 
+        self.setHorizontalHeaderLabels([
+            "IP Address", "Port", "Client", "Progress", 
+            "Down Speed", "Up Speed", "Flags", "Conn. Type", "Source"
+        ])
+        self.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.setSelectionBehavior(QTableWidget.SelectRows)
+        self.verticalHeader().setVisible(False)
+        self.setAlternatingRowColors(True)
+
+        header = self.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Interactive) 
+        header.setSectionResizeMode(1, QHeaderView.Interactive) 
+        header.setSectionResizeMode(2, QHeaderView.Stretch)   
+        header.setSectionResizeMode(3, QHeaderView.Interactive) 
+        header.setSectionResizeMode(6, QHeaderView.Interactive) 
+        header.setSectionResizeMode(7, QHeaderView.Interactive) 
+        header.setSectionResizeMode(8, QHeaderView.Interactive) 
+
+        self.setColumnWidth(0, 120) 
+        self.setColumnWidth(1, 50)  
+        self.setColumnWidth(3, 80)  
+        self.setColumnWidth(4, 80)  
+        self.setColumnWidth(5, 80)  
+        self.setColumnWidth(6, 80)  
+        self.setColumnWidth(7, 80)  
+        self.setColumnWidth(8, 80)  
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        if self.rowCount() == 0:
+            painter = QPainter(self.viewport())
+            painter.save()
+            font = self.font()
+            font.setPointSize(11)
+            painter.setFont(font)
+            text_color = QColor("#888888")
+            painter.setPen(text_color)
+            placeholder_text = "No connected peers."
+            # if self.parentWidget() and hasattr(self.parentWidget(), '_current_info_hash') and not self.parentWidget()._current_info_hash:
+            #     placeholder_text = "Select a torrent to view peers."
+            painter.drawText(self.viewport().rect(), Qt.AlignCenter, placeholder_text)
+            painter.restore()
 
 class TorrentDetailWidget(QWidget):
     """Widget to display detailed information about a selected torrent."""
@@ -76,69 +164,23 @@ class TorrentDetailWidget(QWidget):
         self.tab_widget.addTab(self.general_tab, "General")
 
     def _create_files_tab(self):
-        self.files_tab = QWidget()
-        layout = QVBoxLayout(self.files_tab)
+        self.files_tab_page = QWidget() # Create a page widget
+        layout = QVBoxLayout(self.files_tab_page)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        self.files_table = QTableWidget()
-        self.files_table.setColumnCount(5)
-        self.files_table.setHorizontalHeaderLabels(["Path", "Size", "Progress", "Downloaded", "Priority"])
-        self.files_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.files_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.files_table.verticalHeader().setVisible(False)
-        self.files_table.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.files_table = FilesTableWidget() # Use the new class
         self.files_table.customContextMenuRequested.connect(self._show_files_table_context_menu)
-
-        header = self.files_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Stretch) # Path
-        header.setSectionResizeMode(1, QHeaderView.Interactive) # Size
-        header.setSectionResizeMode(2, QHeaderView.Stretch) # Progress
-        header.setSectionResizeMode(3, QHeaderView.Interactive) # Downloaded
-        header.setSectionResizeMode(4, QHeaderView.Interactive) # Priority
-
-        self.files_table.setColumnWidth(1, 100) # Size
-        self.files_table.setColumnWidth(3, 100) # Downloaded
-        self.files_table.setColumnWidth(4, 100) # Priority
-        
         layout.addWidget(self.files_table)
-        self.tab_widget.addTab(self.files_tab, "Files")
+        self.tab_widget.addTab(self.files_tab_page, "Files")
 
     def _create_peers_tab(self):
-        self.peers_tab = QWidget()
-        layout = QVBoxLayout(self.peers_tab)
+        self.peers_tab_page = QWidget() # Create a page widget
+        layout = QVBoxLayout(self.peers_tab_page)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        self.peers_table = QTableWidget()
-        self.peers_table.setColumnCount(9) # IP, Port, Client, Progress, Down, Up, Flags, Type, Source
-        self.peers_table.setHorizontalHeaderLabels([
-            "IP Address", "Port", "Client", "Progress", 
-            "Down Speed", "Up Speed", "Flags", "Conn. Type", "Source"
-        ])
-        self.peers_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.peers_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.peers_table.verticalHeader().setVisible(False)
-        self.peers_table.setAlternatingRowColors(True)
-
-        header = self.peers_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.Interactive) # IP Address
-        header.setSectionResizeMode(1, QHeaderView.Interactive) # Port
-        header.setSectionResizeMode(2, QHeaderView.Stretch)   # Client
-        header.setSectionResizeMode(3, QHeaderView.Interactive) # Progress
-        header.setSectionResizeMode(6, QHeaderView.Interactive) # Flags
-        header.setSectionResizeMode(7, QHeaderView.Interactive) # Conn. Type
-        header.setSectionResizeMode(8, QHeaderView.Interactive) # Source
-
-        self.peers_table.setColumnWidth(0, 120) # IP
-        self.peers_table.setColumnWidth(1, 50)  # Port
-        self.peers_table.setColumnWidth(3, 80)  # Progress
-        self.peers_table.setColumnWidth(4, 80)  # Down Speed
-        self.peers_table.setColumnWidth(5, 80)  # Up Speed
-        self.peers_table.setColumnWidth(6, 80)  # Flags
-        self.peers_table.setColumnWidth(7, 80)  # Conn. Type
-        self.peers_table.setColumnWidth(8, 80)  # Source
-        
+        self.peers_table = PeersTableWidget() # Use the new class
         layout.addWidget(self.peers_table)
-        self.tab_widget.addTab(self.peers_tab, "Peers")
+        self.tab_widget.addTab(self.peers_tab_page, "Peers")
 
     def _show_files_table_context_menu(self, position):
         selected_items = self.files_table.selectedItems()
@@ -230,7 +272,8 @@ class TorrentDetailWidget(QWidget):
 
         # Update files tab
         if hasattr(self, 'files_table'):
-            self.files_table.setRowCount(0) # Clear previous entries
+            if self._current_info_hash != status_dict.get('info_hash'): # If torrent changed, clear first
+                self.files_table.setRowCount(0)
             files_data = status_dict.get('files', [])
             if files_data:
                 self.files_table.setRowCount(len(files_data))
@@ -260,17 +303,16 @@ class TorrentDetailWidget(QWidget):
                     priority_item.setForeground(priority_color)
                     priority_item.setTextAlignment(Qt.AlignCenter)
                     self.files_table.setItem(i, 4, priority_item)
+            elif not status_dict.get('has_metadata', False):
+                self.files_table.setRowCount(0) # Clear if no metadata, placeholder will show "fetching"
             else:
-                # Show a message if no files or metadata not yet available
-                self.files_table.setRowCount(1)
-                no_files_item = QTableWidgetItem("No file information available (or metadata not yet received).")
-                no_files_item.setTextAlignment(Qt.AlignCenter)
-                self.files_table.setItem(0, 0, no_files_item)
-                self.files_table.setSpan(0, 0, 1, self.files_table.columnCount())
+                self.files_table.setRowCount(0) # No files, placeholder will show "No files"
+            self.files_table.viewport().update()
 
         # Update peers tab
         if hasattr(self, 'peers_table'):
-            self.peers_table.setRowCount(0)
+            if self._current_info_hash != status_dict.get('info_hash'):
+                self.peers_table.setRowCount(0)
             peers_data = status_dict.get('peers', [])
             if peers_data:
                 self.peers_table.setRowCount(len(peers_data))
@@ -308,15 +350,12 @@ class TorrentDetailWidget(QWidget):
                     source_item.setTextAlignment(Qt.AlignCenter)
                     self.peers_table.setItem(i, 8, source_item)
             else:
-                self.peers_table.setRowCount(1)
-                no_peers_item = QTableWidgetItem("No peer information available.")
-                no_peers_item.setTextAlignment(Qt.AlignCenter)
-                self.peers_table.setItem(0, 0, no_peers_item)
-                self.peers_table.setSpan(0, 0, 1, self.peers_table.columnCount())
+                self.peers_table.setRowCount(0) # No peers, placeholder will show "No connected peers"
+            self.peers_table.viewport().update()
 
     def clear_details(self):
         self._current_info_hash = None # Clear stored info_hash
-        self.lbl_name.setText("N/A")
+        self.lbl_name.setText("Select a torrent to see details")
         self.lbl_save_path.setText("N/A")
         self.lbl_info_hash.setText("N/A")
         self.lbl_status.setText("N/A")
@@ -332,10 +371,12 @@ class TorrentDetailWidget(QWidget):
         # Clear files tab
         if hasattr(self, 'files_table'):
             self.files_table.setRowCount(0)
+            self.files_table.viewport().update() # Show placeholder
         
         # Clear peers tab
         if hasattr(self, 'peers_table'):
             self.peers_table.setRowCount(0)
+            self.peers_table.viewport().update() # Show placeholder
 
 # Example usage (for testing, not part of the final app flow here)
 if __name__ == '__main__':

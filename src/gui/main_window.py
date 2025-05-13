@@ -376,7 +376,7 @@ class MainWindow(QMainWindow):
         else:
             resume_icon = self.style().standardIcon(QStyle.SP_MediaPlay) # Fallback
         self.action_resume = QAction(resume_icon, "Resume Selected", self)
-        # self.action_resume.triggered.connect(self.resume_selected_torrent) # Connect this later
+        self.action_resume.triggered.connect(self.resume_selected_torrent)
         self.toolbar.addAction(self.action_resume)
         
         # Pause action (singular)
@@ -387,7 +387,7 @@ class MainWindow(QMainWindow):
         else:
             pause_icon = self.style().standardIcon(QStyle.SP_MediaPause) # Fallback
         self.action_pause = QAction(pause_icon, "Pause Selected", self)
-        # self.action_pause.triggered.connect(self.pause_selected_torrent) # Connect this later
+        self.action_pause.triggered.connect(self.pause_selected_torrent)
         self.toolbar.addAction(self.action_pause)
 
         # Remove action (singular)
@@ -398,7 +398,7 @@ class MainWindow(QMainWindow):
         else:
             remove_icon = self.style().standardIcon(QStyle.SP_TrashIcon) # Fallback
         self.action_remove = QAction(remove_icon, "Remove Selected", self)
-        # self.action_remove.triggered.connect(self.remove_selected_torrent_dialog) # Connect this later
+        self.action_remove.triggered.connect(self.remove_selected_torrent_dialog)
         self.toolbar.addAction(self.action_remove)
         
         self.toolbar.addSeparator()
@@ -665,9 +665,19 @@ class MainWindow(QMainWindow):
             
     def handle_remove_torrent(self, info_hash, delete_files=False):
         """Remove a torrent from the client"""
+        torrent_name = "Unknown Torrent"
+        if info_hash in self.torrent_client.torrents:
+            status = self.torrent_client.torrents[info_hash].get_status()
+            if status: # Ensure status is not None
+                torrent_name = status.get('name', info_hash[:8])
+
         self.torrent_client.remove_torrent(info_hash, delete_files)
-        self.torrent_table.remove_torrent_row(info_hash)
-        
+        self.torrent_table.remove_torrent_row(info_hash) # This should be called after client removal
+        self.statusbar.showMessage(f"Torrent '{torrent_name}' removed.", 5000)
+        # If the removed torrent was selected, clear details view
+        if hasattr(self, 'torrent_detail_widget') and self.torrent_detail_widget._current_info_hash == info_hash:
+            self.torrent_detail_widget.clear_details()
+
     def pause_all_torrents(self):
         """Pause all torrents"""
         for torrent in self.torrent_client.torrents.values():
@@ -876,4 +886,148 @@ class MainWindow(QMainWindow):
             QMessageBox QPushButton:hover { background-color: #005C99; }
             QMessageBox QPushButton:pressed { background-color: #004C80; }
         """)
-        msg_box.exec_() 
+        msg_box.exec_()
+
+    def _get_selected_torrent_info_hash(self):
+        """Helper to get the info_hash of the currently selected torrent in the table."""
+        selected_rows = self.torrent_table.selectionModel().selectedRows()
+        if not selected_rows: # Check if any rows are selected
+            # self.statusbar.showMessage("No torrent selected.", 3000)
+            return None
+        
+        # Assuming single selection mode as per TorrentTableWidget setup
+        current_row = selected_rows[0].row()
+        if 0 <= current_row < self.torrent_table.rowCount(): # Check if row index is valid
+            return self.torrent_table.torrent_hashes.get(current_row)
+        return None
+
+    def resume_selected_torrent(self):
+        """Resumes the selected torrent in the torrent table."""
+        info_hash = self._get_selected_torrent_info_hash()
+        if info_hash:
+            if info_hash in self.torrent_client.torrents:
+                self.resume_torrent(info_hash) # Call existing method that handles client interaction
+                torrent_name = self.torrent_client.torrents[info_hash].get_status().get('name', info_hash[:8])
+                self.statusbar.showMessage(f"Resuming torrent: {torrent_name}", 3000)
+            else:
+                self.statusbar.showMessage("Selected torrent not found in client.", 3000)
+        else:
+            self.statusbar.showMessage("No torrent selected to resume.", 3000)
+
+    def pause_selected_torrent(self):
+        """Pauses the selected torrent in the torrent table."""
+        info_hash = self._get_selected_torrent_info_hash()
+        if info_hash:
+            if info_hash in self.torrent_client.torrents:
+                self.pause_torrent(info_hash) # Call existing method
+                torrent_name = self.torrent_client.torrents[info_hash].get_status().get('name', info_hash[:8])
+                self.statusbar.showMessage(f"Pausing torrent: {torrent_name}", 3000)
+            else:
+                self.statusbar.showMessage("Selected torrent not found in client.", 3000)
+        else:
+            self.statusbar.showMessage("No torrent selected to pause.", 3000)
+
+    def remove_selected_torrent_dialog(self):
+        """Shows a confirmation dialog to remove the selected torrent."""
+        info_hash = self._get_selected_torrent_info_hash()
+        if not info_hash:
+            self.statusbar.showMessage("No torrent selected to remove.", 3000)
+            return
+
+        if info_hash not in self.torrent_client.torrents:
+            self.statusbar.showMessage("Selected torrent not found in client. Cannot remove.", 3000)
+            # It might have been removed by another process, clean from table if necessary
+            self.torrent_table.remove_torrent_row(info_hash) 
+            return
+
+        torrent_name = self.torrent_client.torrents[info_hash].get_status().get('name', info_hash[:8])
+
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Question)
+        msg_box.setWindowTitle("Confirm Removal")
+        msg_box.setText(f"Are you sure you want to remove torrent: <b>{torrent_name}</b>?")
+        msg_box.setInformativeText("This action cannot be undone.")
+        
+        remove_button = msg_box.addButton("Remove", QMessageBox.ActionRole)
+        remove_and_data_button = msg_box.addButton("Remove and Delete Files", QMessageBox.DestructiveRole)
+        cancel_button = msg_box.addButton(QMessageBox.Cancel)
+        
+        msg_box.setDefaultButton(cancel_button)
+        # Apply custom stylesheet for themed dialog
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: #2B2B2B; color: #E0E0E0;
+                font-family: "Segoe UI", Arial, sans-serif;
+            }
+            QMessageBox QLabel#qt_msgbox_label { /* Main text */
+                color: #E0E0E0;
+                background-color: transparent;
+            }
+            QMessageBox QLabel#qt_msgbox_informativetext { /* Informative text */
+                color: #B0B0B0;
+                background-color: transparent;
+            }
+            QMessageBox QPushButton {
+                background-color: #007ACC; /* Default blue for standard actions */
+                color: white;
+                border: 1px solid #007ACC;
+                padding: 7px 15px;
+                border-radius: 4px;
+                min-width: 80px;
+                margin: 3px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #005C99;
+            }
+            QMessageBox QPushButton:pressed {
+                background-color: #004C80;
+            }
+            /* Style for DestructiveRole button (Remove and Delete Files) */
+            QMessageBox QPushButton[cssClass="destructive"] {
+                background-color: #D32F2F; /* Red for destructive actions */
+                border-color: #D32F2F;
+            }
+            QMessageBox QPushButton[cssClass="destructive"]:hover {
+                background-color: #B71C1C;
+            }
+            QMessageBox QPushButton[cssClass="destructive"]:pressed {
+                background-color: #9F1919;
+            }
+        """)
+        # More reliable way to style the destructive button:
+        for btn in msg_box.buttons():
+            if msg_box.buttonRole(btn) == QMessageBox.DestructiveRole:
+                btn.setObjectName("DestructiveButton") # Set object name
+                # Apply specific style to this button using its object name
+                # This overrides the general QPushButton style from msg_box.setStyleSheet for this button
+                btn.setStyleSheet("""QPushButton#DestructiveButton { 
+                                        background-color: #D32F2F; 
+                                        border-color: #D32F2F; color: white; 
+                                    }
+                                    QPushButton#DestructiveButton:hover { 
+                                        background-color: #B71C1C; 
+                                    }
+                                    QPushButton#DestructiveButton:pressed { 
+                                        background-color: #9F1919; 
+                                    }""")
+            elif msg_box.buttonRole(btn) == QMessageBox.ActionRole: # The "Remove" button
+                 btn.setObjectName("ActionButton")
+                 btn.setStyleSheet("""QPushButton#ActionButton { 
+                                        background-color: #FFA000; /* Amber for non-destructive action */ 
+                                        border-color: #FFA000; color: black; 
+                                     }
+                                     QPushButton#ActionButton:hover { 
+                                        background-color: #FF8F00; 
+                                     }
+                                     QPushButton#ActionButton:pressed { 
+                                        background-color: #FF6F00; 
+                                     }""")
+
+        msg_box.exec_()
+
+        clicked_button = msg_box.clickedButton()
+        if clicked_button == remove_button:
+            self.handle_remove_torrent(info_hash, delete_files=False)
+        elif clicked_button == remove_and_data_button:
+            self.handle_remove_torrent(info_hash, delete_files=True)
+        # If cancel or closed, do nothing 

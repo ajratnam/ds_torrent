@@ -4,7 +4,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
                             QLabel, QComboBox, QMenu, QAction, QMessageBox, 
                             QInputDialog)
 from PyQt5.QtCore import Qt, pyqtSignal, pyqtSlot
-from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtGui import QColor, QFont, QPainter
 
 
 class SearchResultsTable(QTableWidget):
@@ -43,6 +43,27 @@ class SearchResultsTable(QTableWidget):
         # Double click to download
         self.cellDoubleClicked.connect(lambda row, col: self.download_requested.emit(row))
         
+    def paintEvent(self, event):
+        """Custom paint event to show placeholder text."""
+        super().paintEvent(event)
+        if self.rowCount() == 0:
+            parent_tab = self.parentWidget()
+            placeholder_text = "Perform a search to see results."
+            if hasattr(parent_tab, 'last_search_had_results') and not parent_tab.last_search_had_results:
+                placeholder_text = "No results found for your search."
+            elif hasattr(parent_tab, 'is_searching') and parent_tab.is_searching:
+                return # Don't show placeholder if a search is actively in progress (progress bar is visible)
+
+            painter = QPainter(self.viewport())
+            painter.save()
+            font = self.font()
+            font.setPointSize(12)
+            painter.setFont(font)
+            text_color = QColor("#888888") 
+            painter.setPen(text_color)
+            painter.drawText(self.viewport().rect(), Qt.AlignCenter, placeholder_text)
+            painter.restore()
+
     def show_context_menu(self, position):
         """Show context menu for search results"""
         row = self.rowAt(position.y())
@@ -67,6 +88,8 @@ class SearchTab(QWidget):
         
         self.search_engine = search_engine
         self.search_results = []
+        self.last_search_had_results = True # Assume true initially, or set based on actual state
+        self.is_searching_flag = False # To track if a search is ongoing
         
         # Setup UI
         self.setup_ui()
@@ -139,6 +162,9 @@ class SearchTab(QWidget):
         # Show progress bar
         self.progress_bar.setVisible(True)
         self.progress_bar.setValue(0)
+        self.is_searching_flag = True # Set searching flag
+        self.last_search_had_results = True # Reset this flag before a new search
+        self.results_table.viewport().update() # Ensure placeholder is cleared/updated
         
         # Update status
         self.status_label.setText(f"Searching for: {query}")
@@ -149,7 +175,9 @@ class SearchTab(QWidget):
     @pyqtSlot(list)
     def on_search_completed(self, results):
         """Handle search completion"""
+        self.is_searching_flag = False
         self.search_results = results
+        self.last_search_had_results = bool(results)
         
         # Sort results according to the selected option
         sort_column = self.sort_by.currentText().lower()
@@ -201,16 +229,20 @@ class SearchTab(QWidget):
         
         # Update status
         self.status_label.setText(f"Found {len(results)} results")
+        self.results_table.viewport().update() # Update to show results or new placeholder
         
     @pyqtSlot(str)
     def on_search_error(self, error_msg):
         """Handle search errors"""
+        self.is_searching_flag = False
+        self.last_search_had_results = False # Assume error means no results for placeholder purposes
         # Hide progress bar
         self.progress_bar.setVisible(False)
         
         # Update status
         self.status_label.setText(f"Error: {error_msg}")
         self.status_label.setStyleSheet("color: #FF5252;") # Error color for status label
+        self.results_table.viewport().update() # Update to show "no results" or error related placeholder
         
     @pyqtSlot(int, int)
     def on_search_progress(self, current, total):

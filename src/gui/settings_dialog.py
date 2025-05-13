@@ -1,10 +1,12 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QSpinBox, QPushButton, QLineEdit, QFileDialog,
                             QTabWidget, QWidget, QGroupBox, QFormLayout,
-                            QCheckBox, QComboBox)
-from PyQt5.QtCore import Qt
+                            QCheckBox, QComboBox, QListWidget, QStackedWidget, QListWidgetItem, QSplitter)
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QStyle
 import libtorrent as lt
+import os
 
 class SettingsDialog(QDialog):
     """Dialog for application settings"""
@@ -12,38 +14,79 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         
         self.setWindowTitle("Settings")
-        self.setMinimumWidth(400)
+        self.setMinimumWidth(600)
+        self.setMinimumHeight(450)
         
-        # Setup UI
         self.setup_ui()
         
     def setup_ui(self):
-        """Setup dialog UI"""
-        layout = QVBoxLayout(self)
+        """Setup dialog UI with a list/stack layout."""
+        main_layout = QVBoxLayout(self)
+
+        content_splitter = QSplitter(Qt.Horizontal)
+        main_layout.addWidget(content_splitter, 1)
+
+        # Category List (Left Side)
+        self.category_list = QListWidget()
+        self.category_list.setMaximumWidth(200)
+        self.category_list.setMinimumWidth(120)
+        self.category_list.setStyleSheet(""" QListView::item { padding: 8px 5px; } """)
+        content_splitter.addWidget(self.category_list)
+
+        # Settings Stack (Right Side)
+        self.settings_stack = QStackedWidget()
+        content_splitter.addWidget(self.settings_stack)
+
+        # Set initial splitter sizes (e.g., 30% for list, 70% for stack)
+        content_splitter.setSizes([150, 350])
+
+        # Create and add pages to the stack
+        self.page_general = QWidget()
+        self.setup_general_page(self.page_general)
+        self.settings_stack.addWidget(self.page_general)
+
+        self.page_connection = QWidget()
+        self.setup_connection_page(self.page_connection)
+        self.settings_stack.addWidget(self.page_connection)
+
+        self.page_advanced = QWidget()
+        self.setup_advanced_page(self.page_advanced)
+        self.settings_stack.addWidget(self.page_advanced)
         
-        # Create tabs
-        self.tab_widget = QTabWidget()
-        layout.addWidget(self.tab_widget)
-        
-        # Create general settings tab
-        self.general_tab = QWidget()
-        self.tab_widget.addTab(self.general_tab, "General")
-        
-        # Create connection settings tab
-        self.connection_tab = QWidget()
-        self.tab_widget.addTab(self.connection_tab, "Connection")
-        
-        # Create advanced settings tab
-        self.advanced_tab = QWidget()
-        self.tab_widget.addTab(self.advanced_tab, "Advanced")
-        
-        # Setup tabs
-        self.setup_general_tab()
-        self.setup_connection_tab()
-        self.setup_advanced_tab()
-        
+        # Populate category list
+        icons_base_path = os.path.join(os.path.dirname(__file__), "icons")
+
+        self.item_general = QListWidgetItem("General")
+        try:
+            icon_general = QIcon(os.path.join(icons_base_path, "settings_general.png"))
+            if not icon_general.isNull(): self.item_general.setIcon(icon_general)
+            else: self.item_general.setIcon(self.style().standardIcon(QStyle.SP_FileDialogInfoView))
+        except: self.item_general.setIcon(self.style().standardIcon(QStyle.SP_FileDialogInfoView))
+        self.category_list.addItem(self.item_general)
+
+        self.item_connection = QListWidgetItem("Connection")
+        try:
+            icon_connection = QIcon(os.path.join(icons_base_path, "settings_connection.png"))
+            if not icon_connection.isNull(): self.item_connection.setIcon(icon_connection)
+            else: self.item_connection.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        except: self.item_connection.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        self.category_list.addItem(self.item_connection)
+
+        self.item_advanced = QListWidgetItem("Advanced")
+        try:
+            icon_advanced = QIcon(os.path.join(icons_base_path, "settings_advanced.png"))
+            if not icon_advanced.isNull(): self.item_advanced.setIcon(icon_advanced)
+            else: self.item_advanced.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        except: self.item_advanced.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
+        self.category_list.addItem(self.item_advanced)
+
+        self.category_list.setIconSize(QSize(20, 20))
+        self.category_list.currentRowChanged.connect(self.settings_stack.setCurrentIndex)
+        self.category_list.setCurrentRow(0)
+
         # Add buttons
         button_layout = QHBoxLayout()
+        button_layout.addStretch()
         
         self.ok_button = QPushButton("OK")
         self.ok_button.clicked.connect(self.accept)
@@ -51,25 +94,23 @@ class SettingsDialog(QDialog):
         self.cancel_button = QPushButton("Cancel")
         self.cancel_button.clicked.connect(self.reject)
         
-        button_layout.addStretch()
         button_layout.addWidget(self.cancel_button)
         button_layout.addWidget(self.ok_button)
         
-        layout.addLayout(button_layout)
+        main_layout.addLayout(button_layout)
         
-        # Add stretch to push everything to the top
-        layout.addStretch()
-        
-    def setup_general_tab(self):
-        """Setup general settings tab"""
-        layout = QVBoxLayout(self.general_tab)
+    def setup_general_page(self, page_widget):
+        """Setup general settings page."""
+        layout = QVBoxLayout(page_widget)
         
         # Download location group
         download_group = QGroupBox("Download Location")
         download_layout = QHBoxLayout(download_group)
         
         self.save_path_edit = QLineEdit()
-        self.save_path_edit.setText(self.parent().default_save_path)
+        parent_obj = self.parent()
+        default_path = parent_obj.default_save_path if hasattr(parent_obj, 'default_save_path') else os.path.expanduser("~")
+        self.save_path_edit.setText(default_path)
         
         self.browse_button = QPushButton("Browse...")
         self.browse_button.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
@@ -81,20 +122,91 @@ class SettingsDialog(QDialog):
         layout.addWidget(download_group)
         
         # Interface settings group
-        interface_group = QGroupBox("Interface")
+        interface_group = QGroupBox("Application Interface")
         interface_layout = QFormLayout(interface_group)
         
-        self.start_minimized_check = QCheckBox()
-        self.show_speed_in_title_check = QCheckBox()
-        self.confirm_on_exit_check = QCheckBox()
+        self.start_minimized_check = QCheckBox("Start minimized to system tray")
+        self.show_speed_in_title_check = QCheckBox("Show transfer speed in window title")
+        self.confirm_on_exit_check = QCheckBox("Confirm before exiting application")
         
-        interface_layout.addRow("Start minimized to tray:", self.start_minimized_check)
-        interface_layout.addRow("Show speed in window title:", self.show_speed_in_title_check)
-        interface_layout.addRow("Confirm on exit:", self.confirm_on_exit_check)
+        interface_layout.addRow(self.start_minimized_check)
+        interface_layout.addRow(self.show_speed_in_title_check)
+        interface_layout.addRow(self.confirm_on_exit_check)
         
         layout.addWidget(interface_group)
+        layout.addStretch()
+
+    def setup_connection_page(self, page_widget):
+        """Setup connection settings page."""
+        layout = QVBoxLayout(page_widget)
         
-        # Add stretch to push everything to the top
+        # Speed limits group
+        limits_group = QGroupBox("Speed Limits")
+        limits_layout = QFormLayout(limits_group)
+        
+        self.download_limit_spin = QSpinBox()
+        self.download_limit_spin.setRange(0, 100000)
+        self.download_limit_spin.setValue(0)
+        self.download_limit_spin.setSuffix(" KiB/s (0 = unlimited)")
+        self.download_limit_spin.setSpecialValueText("Unlimited")
+        
+        self.upload_limit_spin = QSpinBox()
+        self.upload_limit_spin.setRange(0, 100000)
+        self.upload_limit_spin.setValue(0)
+        self.upload_limit_spin.setSuffix(" KiB/s (0 = unlimited)")
+        self.upload_limit_spin.setSpecialValueText("Unlimited")
+        
+        limits_layout.addRow("Download limit:", self.download_limit_spin)
+        limits_layout.addRow("Upload limit:", self.upload_limit_spin)
+        
+        layout.addWidget(limits_group)
+        
+        # Connection settings group
+        conn_group = QGroupBox("Network Connection")
+        conn_layout = QFormLayout(conn_group)
+        
+        self.port_spin = QSpinBox()
+        self.port_spin.setRange(1024, 65535)
+        self.port_spin.setValue(6881)
+        
+        self.max_conn_spin = QSpinBox()
+        self.max_conn_spin.setRange(1, 5000)
+        self.max_conn_spin.setValue(200)
+        
+        self.max_conn_per_torrent_spin = QSpinBox()
+        self.max_conn_per_torrent_spin.setRange(1, 1000)
+        self.max_conn_per_torrent_spin.setValue(50)
+        
+        conn_layout.addRow("Listening Port:", self.port_spin)
+        conn_layout.addRow("Global max connections:", self.max_conn_spin)
+        conn_layout.addRow("Max connections per torrent:", self.max_conn_per_torrent_spin)
+        
+        layout.addWidget(conn_group)
+        layout.addStretch()
+
+    def setup_advanced_page(self, page_widget):
+        """Setup advanced settings page."""
+        layout = QVBoxLayout(page_widget)
+        
+        # BitTorrent settings group
+        bt_group = QGroupBox("BitTorrent Protocol")
+        bt_layout = QFormLayout(bt_group)
+        
+        self.dht_check = QCheckBox("Enable DHT (Distributed Hash Table)")
+        self.dht_check.setChecked(True)
+        
+        self.lsd_check = QCheckBox("Enable LSD (Local Peer Discovery)")
+        self.lsd_check.setChecked(True)
+        
+        self.encryption_combo = QComboBox()
+        self.encryption_combo.addItems(["Prefer Encryption", "Require Encryption", "Disable Encryption"])
+        self.encryption_combo.setToolTip("Controls how encryption is used for peer connections.")
+
+        bt_layout.addRow(self.dht_check)
+        bt_layout.addRow(self.lsd_check)
+        bt_layout.addRow("Encryption Mode:", self.encryption_combo)
+        
+        layout.addWidget(bt_group)
         layout.addStretch()
         
     def populate_interface_settings(self, confirm_on_exit, start_minimized, show_speed_in_title):
@@ -113,29 +225,26 @@ class SettingsDialog(QDialog):
 
     def populate_client_settings(self, client_settings_dict):
         """Populate connection and advanced settings from a settings dictionary."""
-        # Connection Tab
+        # Connection Page Widgets
         self.download_limit_spin.setValue(client_settings_dict.get('download_rate_limit', 0) // 1024)
         self.upload_limit_spin.setValue(client_settings_dict.get('upload_rate_limit', 0) // 1024)
         
         listen_interfaces_str = client_settings_dict.get('listen_interfaces', '0.0.0.0:6881')
         try:
-            port = int(listen_interfaces_str.split(':')[1])
+            port_str = listen_interfaces_str.split(':')[1]
+            port = int(port_str)
             self.port_spin.setValue(port)
         except (IndexError, ValueError) as e:
             print(f"Could not parse port from listen_interfaces: '{listen_interfaces_str}'. Error: {e}")
             self.port_spin.setValue(6881)
-        self.max_conn_spin.setValue(client_settings_dict.get('connections_limit', 100))
-        default_unchoke_slots = 8
-        self.max_conn_per_torrent_spin.setValue(client_settings_dict.get('unchoke_slots_limit', default_unchoke_slots))
+        
+        self.max_conn_spin.setValue(client_settings_dict.get('connections_limit', 200))
+        self.max_conn_per_torrent_spin.setValue(client_settings_dict.get('unchoke_slots_limit', 50))
 
-        # Advanced Tab
+        # Advanced Page Widgets
         self.dht_check.setChecked(client_settings_dict.get('enable_dht', True))
         self.lsd_check.setChecked(client_settings_dict.get('enable_lsd', True))
 
-        # Encryption settings
-        # Values in client_settings_dict for these are expected to be integers from libtorrent constants
-        # For policies (out_enc_policy, in_enc_policy), use pe_* variants from lt.enc_level
-        # For allowed level (allowed_enc_level), use direct variants from lt.enc_level
         out_policy = client_settings_dict.get('out_enc_policy', lt.enc_level.pe_rc4) 
         in_policy = client_settings_dict.get('in_enc_policy', lt.enc_level.pe_rc4)
         allowed_level = client_settings_dict.get('allowed_enc_level', lt.enc_level.rc4)
@@ -143,131 +252,59 @@ class SettingsDialog(QDialog):
         if (out_policy == lt.enc_level.pe_plaintext and
             in_policy == lt.enc_level.pe_plaintext and
             allowed_level == lt.enc_level.plaintext):
-            self.encryption_combo.setCurrentIndex(2) # Disable
+            self.encryption_combo.setCurrentIndex(2)
         elif (out_policy == lt.enc_level.pe_rc4 and
               in_policy == lt.enc_level.pe_rc4 and
               allowed_level == lt.enc_level.rc4):
-            self.encryption_combo.setCurrentIndex(1) # Require
-        else: # Covers 'both' policies (pe_both) and 'both' allowed_level, or defaults to Prefer
-              # lt.enc_level.pe_both for policies, lt.enc_level.both for level maps to "Prefer" UI
-            self.encryption_combo.setCurrentIndex(0) # Prefer
+            self.encryption_combo.setCurrentIndex(1)
+        else: 
+            self.encryption_combo.setCurrentIndex(0)
 
     def get_client_settings(self):
         """Return a dictionary of client settings with string keys for libtorrent session."""
         settings = {}
-        # Connection Tab
+        # Connection Page Widgets
         settings['download_rate_limit'] = self.download_limit_spin.value() * 1024
         settings['upload_rate_limit'] = self.upload_limit_spin.value() * 1024
         settings['listen_interfaces'] = f"0.0.0.0:{self.port_spin.value()}"
         settings['connections_limit'] = self.max_conn_spin.value()
         settings['unchoke_slots_limit'] = self.max_conn_per_torrent_spin.value()
 
-        # Advanced Tab
+        # Advanced Page Widgets
         settings['enable_dht'] = self.dht_check.isChecked()
         settings['enable_lsd'] = self.lsd_check.isChecked()
 
-        # Encryption
-        # UI "Prefer Encryption" (idx 0)  => out_enc_policy=pe_both, in_enc_policy=pe_both, allowed_enc_level=both
-        # UI "Require Encryption" (idx 1) => out_enc_policy=pe_rc4, in_enc_policy=pe_rc4, allowed_enc_level=rc4
-        # UI "Disable Encryption" (idx 2) => out_enc_policy=pe_plaintext, in_enc_policy=pe_plaintext, allowed_enc_level=plaintext
         enc_index = self.encryption_combo.currentIndex()
-        if enc_index == 0: # Prefer encryption
+        if enc_index == 0:
             settings['out_enc_policy'] = lt.enc_level.pe_both
             settings['in_enc_policy'] = lt.enc_level.pe_both
             settings['allowed_enc_level'] = lt.enc_level.both
-        elif enc_index == 1: # Require encryption
+        elif enc_index == 1:
             settings['out_enc_policy'] = lt.enc_level.pe_rc4
             settings['in_enc_policy'] = lt.enc_level.pe_rc4
             settings['allowed_enc_level'] = lt.enc_level.rc4
-        elif enc_index == 2: # Disable encryption
+        elif enc_index == 2:
             settings['out_enc_policy'] = lt.enc_level.pe_plaintext
             settings['in_enc_policy'] = lt.enc_level.pe_plaintext
             settings['allowed_enc_level'] = lt.enc_level.plaintext
         return settings
 
-    def setup_connection_tab(self):
-        """Setup connection settings tab"""
-        layout = QVBoxLayout(self.connection_tab)
-        
-        # Speed limits group
-        limits_group = QGroupBox("Speed Limits")
-        limits_layout = QFormLayout(limits_group)
-        
-        self.download_limit_spin = QSpinBox()
-        self.download_limit_spin.setRange(0, 10000)
-        self.download_limit_spin.setValue(0)
-        self.download_limit_spin.setSuffix(" KiB/s (0: unlimited)")
-        
-        self.upload_limit_spin = QSpinBox()
-        self.upload_limit_spin.setRange(0, 10000)
-        self.upload_limit_spin.setValue(0)
-        self.upload_limit_spin.setSuffix(" KiB/s (0: unlimited)")
-        
-        limits_layout.addRow("Download limit:", self.download_limit_spin)
-        limits_layout.addRow("Upload limit:", self.upload_limit_spin)
-        
-        layout.addWidget(limits_group)
-        
-        # Connection settings group
-        conn_group = QGroupBox("Connection Settings")
-        conn_layout = QFormLayout(conn_group)
-        
-        self.port_spin = QSpinBox()
-        self.port_spin.setRange(1, 65535)
-        self.port_spin.setValue(6881)
-        
-        self.max_conn_spin = QSpinBox()
-        self.max_conn_spin.setRange(1, 500)
-        self.max_conn_spin.setValue(100)
-        
-        self.max_conn_per_torrent_spin = QSpinBox()
-        self.max_conn_per_torrent_spin.setRange(1, 100)
-        self.max_conn_per_torrent_spin.setValue(50)
-        
-        conn_layout.addRow("Port used:", self.port_spin)
-        conn_layout.addRow("Max connections:", self.max_conn_spin)
-        conn_layout.addRow("Max connections per torrent:", self.max_conn_per_torrent_spin)
-        
-        layout.addWidget(conn_group)
-        
-        # Add stretch to push everything to the top
-        layout.addStretch()
-        
-    def setup_advanced_tab(self):
-        """Setup advanced settings tab"""
-        layout = QVBoxLayout(self.advanced_tab)
-        
-        # BitTorrent settings group
-        bt_group = QGroupBox("BitTorrent")
-        bt_layout = QFormLayout(bt_group)
-        
-        self.dht_check = QCheckBox()
-        self.dht_check.setChecked(True)
-        
-        self.lsd_check = QCheckBox()
-        self.lsd_check.setChecked(True)
-        
-        self.encryption_combo = QComboBox()
-        self.encryption_combo.addItems(["Prefer encryption", "Require encryption", "Disable encryption"])
-        
-        bt_layout.addRow("Enable DHT:", self.dht_check)
-        bt_layout.addRow("Enable Local Peer Discovery:", self.lsd_check)
-        bt_layout.addRow("Encryption mode:", self.encryption_combo)
-        
-        layout.addWidget(bt_group)
-        
-        # Add stretch to push everything to the top
-        layout.addStretch()
-        
     def browse_save_path(self):
         """Open file dialog to select download location"""
+        current_path = self.save_path_edit.text()
+        if not os.path.isdir(current_path):
+            current_path = os.path.expanduser("~")
+
         path = QFileDialog.getExistingDirectory(
-            self, "Select Download Location", self.save_path_edit.text()
+            self, "Select Download Location", current_path
         )
         
         if path:
             self.save_path_edit.setText(path)
             
+    def get_save_path(self):
+        return self.save_path_edit.text()
+
     def get_download_limit(self):
         """Get the download speed limit in KB/s"""
         return self.download_limit_spin.value()

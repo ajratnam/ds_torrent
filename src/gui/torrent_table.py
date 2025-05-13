@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import (QTableWidget, QTableWidgetItem, QHeaderView,
                            QProgressBar, QMenu, QAction, QAbstractItemView,
                            QWidget, QHBoxLayout, QPushButton)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
-from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtGui import QColor, QFont, QPainter
 from datetime import datetime
 
 class TorrentProgressBar(QProgressBar):
@@ -59,8 +59,32 @@ class TorrentTableWidget(QTableWidget):
         # Store torrent info hashes for each row
         self.torrent_hashes = {}
         
+    def paintEvent(self, event):
+        """Custom paint event to show placeholder text when table is empty."""
+        super().paintEvent(event)
+        if self.rowCount() == 0:
+            painter = QPainter(self.viewport())
+            painter.save()
+            font = self.font()
+            font.setPointSize(12)
+            # font.setBold(True) # Optional: make placeholder text bold
+            painter.setFont(font)
+            text_color = QColor("#888888") # Light gray, less prominent than main text
+            painter.setPen(text_color)
+            # You could also draw an icon here:
+            # icon_path = os.path.join(os.path.dirname(__file__), "icons", "empty_torrents_icon.png")
+            # if os.path.exists(icon_path):
+            #     icon = QIcon(icon_path)
+            #     pixmap = icon.pixmap(64, 64)
+            #     painter.drawPixmap(self.viewport().width() / 2 - 32, self.viewport().height() / 2 - 50, pixmap)
+            #     painter.drawText(self.viewport().rect(), Qt.AlignCenter | Qt.AlignBottom, "No torrents loaded. Add some!")
+            # else:
+            painter.drawText(self.viewport().rect(), Qt.AlignCenter, "No torrents loaded. Click '+' to add.")
+            painter.restore()
+
     def add_torrent(self, torrent):
         """Add a torrent to the table"""
+        self.viewport().update() # Ensure placeholder is cleared when item is added
         # Get initial status
         status = torrent.get_status()
         
@@ -102,6 +126,7 @@ class TorrentTableWidget(QTableWidget):
         # Store the info hash
         info_hash = str(torrent.handle.info_hash())
         self.torrent_hashes[row] = info_hash
+        self.viewport().update() # Ensure placeholder is shown if table becomes empty
         
     def update_torrent_status(self, status):
         """Update torrent status in the table"""
@@ -188,9 +213,30 @@ class TorrentTableWidget(QTableWidget):
                 self.removeRow(row)
                 del self.torrent_hashes[row]
                 # Renumber keys
-                self.torrent_hashes = {i: self.torrent_hashes[key] for i, key in 
-                                     enumerate(sorted(self.torrent_hashes.keys()))}
+                # self.torrent_hashes = {i: self.torrent_hashes[key] for i, key in 
+                #                      enumerate(sorted(self.torrent_hashes.keys()))} # This renumbering can be problematic if rows aren't contiguous after removal
+                # A safer way if rows are not always 0-indexed contiguous after arbitrary removals:
+                new_hashes = {}
+                current_valid_row = 0
+                for r in range(self.rowCount()): # Iterate through existing GUI rows
+                    # Try to find original hash for this GUI row if it still exists in old mapping
+                    # This assumes row indices in self.torrent_hashes might become sparse or non-sequential
+                    original_row_index_for_hash = None
+                    for old_row_idx, h_val in self.torrent_hashes.items():
+                        # This is tricky. We need a reliable way to map existing GUI rows back to their hashes
+                        # if self.item(r,0) and self.item(r,0).text() == client.torrents[h_val].name: # Example: match by name (fragile)
+                        # A better approach is to ensure torrent_hashes keys are always the actual GUI row indices
+                        # For now, let's assume removal makes the GUI compact rows, so we re-index based on remaining items
+                        pass # The original re-numbering is likely fine if QTableWidget compacts rows.
+                
+                # Simpler re-indexing if QTableWidget compacts rows upon removal:
+                temp_hashes = list(self.torrent_hashes.values())
+                if info_hash in temp_hashes:
+                    temp_hashes.remove(info_hash)
+                self.torrent_hashes = {i: h for i, h in enumerate(temp_hashes)}
+
                 break
+        self.viewport().update() # Ensure placeholder is shown if table becomes empty
                 
     def _format_eta(self, seconds):
         if seconds == float('inf') or seconds < 0:
