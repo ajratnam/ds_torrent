@@ -21,9 +21,12 @@ class TorrentHandle(QObject):
         self.save_path = save_path
         self.source = source # Store the original source (magnet or filepath)
         self.info = None
-        self.files = []
+        self.files = [] # This will store file details dictionaries
         self.torrent_file = None
         self.last_error = None
+        self.added_on = time.time() # Timestamp when torrent was added
+        self.num_pieces = 0
+        self.piece_length = 0
         
     def get_status(self):
         """Get current status of the torrent"""
@@ -36,10 +39,33 @@ class TorrentHandle(QObject):
                     self.info = self.handle.get_torrent_info()
                     if hasattr(self.info, 'torrent_file'):
                         self.torrent_file = self.info.torrent_file()
-                    self.files = [self.info.files().file_path(i) for i in range(self.info.files().num_files())]
+                    self.num_pieces = self.info.num_pieces()
+                    self.piece_length = self.info.piece_length()
                 
                 name = self.handle.name()
                 total_size = self.info.total_size()
+
+                # Get file details if info is available
+                file_statuses = []
+                if self.info:
+                    fs = self.info.files()
+                    file_progress_lt = self.handle.file_progress(flags=lt.torrent_handle.piece_granularity) # Get progress per file
+                    file_priorities = self.handle.get_file_priorities()
+
+                    for i in range(fs.num_files()):
+                        file_entry = fs.at(i)
+                        file_path = file_entry.path
+                        file_size = file_entry.size
+                        downloaded_bytes = file_progress_lt[i] if i < len(file_progress_lt) else 0
+                        priority = file_priorities[i] if i < len(file_priorities) else 0 # Default to 0 if not set
+                        file_statuses.append({
+                            'path': file_path,
+                            'size': file_size,
+                            'downloaded': downloaded_bytes,
+                            'progress': (downloaded_bytes / file_size * 100) if file_size > 0 else 0,
+                            'priority': priority
+                        })
+                self.files = file_statuses # Update self.files with detailed info
             else:
                 # For magnet links without metadata
                 name = "Fetching metadata..."
@@ -47,7 +73,10 @@ class TorrentHandle(QObject):
                 # Get progress from DHT
                 if status.has_metadata:
                     name = self.handle.name()
-                    total_size = self.handle.get_torrent_info().total_size()
+                    info = self.handle.get_torrent_info() # Get info once available
+                    total_size = info.total_size()
+                    self.num_pieces = info.num_pieces()
+                    self.piece_length = info.piece_length()
                 
             # Determine state and speeds
             if status.paused:
@@ -59,6 +88,12 @@ class TorrentHandle(QObject):
                 download_rate = status.download_rate / 1024
                 upload_rate = status.upload_rate / 1024
                 
+            # Calculate ETA
+            eta_seconds = (total_size - status.total_done) / status.download_payload_rate if status.download_payload_rate > 0 and total_size > status.total_done else float('inf')
+            
+            # Calculate Ratio
+            ratio = status.total_payload_upload / status.total_payload_download if status.total_payload_download > 0 else 0.0
+
             # Build status dictionary
             status_dict = {
                 'name': name,
@@ -67,14 +102,23 @@ class TorrentHandle(QObject):
                 'download_rate': download_rate,
                 'upload_rate': upload_rate,
                 'state': state,
-                'num_seeds': status.num_seeds,
-                'num_peers': status.num_peers,
+                'num_seeds': status.num_seeds, # Connected seeds
+                'num_peers': status.num_peers, # Connected peers (does not include seeds)
+                'total_seeds': status.list_seeds, # Total seeds in swarm
+                'total_peers': status.list_peers, # Total peers in swarm (does not include seeds)
                 'total_download': status.total_download / (1024 * 1024),
                 'total_upload': status.total_upload / (1024 * 1024),
                 'total_size': total_size,
                 'has_metadata': status.has_metadata,
                 'info_hash': str(self.handle.info_hash()),
-                'error': self.last_error
+                'error': self.last_error,
+                'added_on': self.added_on,
+                'eta': eta_seconds,
+                'ratio': ratio,
+                'num_pieces': self.num_pieces,
+                'piece_length': self.piece_length,
+                'distributed_copies': status.distributed_copies, # Availability
+                'files': self.files if self.handle.has_metadata() else [] # Add files list to status_dict
             }
             
             return status_dict
@@ -130,6 +174,32 @@ class TorrentHandle(QObject):
             logger.error(f"Error removing torrent: {str(e)}")
             self.last_error = str(e)
             self.error.emit(str(self.handle.info_hash()), str(e))
+
+    def set_file_priority(self, file_index, priority_level):
+        """Set the priority for a specific file in the torrent."""
+        if not self.handle.is_valid() or not self.handle.has_metadata():
+            logger.warning(f"Cannot set file priority for {self.handle.name()}: Handle invalid or no metadata.")
+            self.error.emit(str(self.handle.info_hash()), "Cannot set file priority: No metadata or invalid handle.")
+            return False
+        
+        torrent_info = self.handle.get_torrent_info()
+        if file_index < 0 or file_index >= torrent_info.num_files():
+            logger.warning(f"Invalid file_index {file_index} for torrent {self.handle.name()}.")
+            self.error.emit(str(self.handle.info_hash()), f"Cannot set file priority: Invalid file index {file_index}.")
+            return False
+
+        try:
+            self.handle.file_priority(file_index, priority_level)
+            logger.info(f"Set priority for file {file_index} of torrent {self.handle.name()} to {priority_level}")
+            # Optionally, re-fetch and emit status to update UI if priority changes affect it immediately
+            # status = self.get_status()
+            # if status:
+            #     self.status_updated.emit(status)
+            return True
+        except Exception as e:
+            logger.error(f"Error setting file priority for {self.handle.name()}, file {file_index}: {str(e)}")
+            self.error.emit(str(self.handle.info_hash()), f"Error setting file priority: {str(e)}")
+            return False
 
 
 class TorrentClient(QObject):
@@ -437,4 +507,14 @@ class TorrentClient(QObject):
             self.session.set_upload_rate_limit(limit_kbps * 1024)
         except Exception as e:
             logger.error(f"Error setting upload limit: {str(e)}")
-            self.error.emit(f"Error setting upload limit: {str(e)}") 
+            self.error.emit(f"Error setting upload limit: {str(e)}")
+
+    def set_torrent_file_priority(self, info_hash, file_index, priority_level):
+        """Set file priority for a torrent identified by info_hash."""
+        if info_hash in self.torrents:
+            torrent_handle_obj = self.torrents[info_hash]
+            return torrent_handle_obj.set_file_priority(file_index, priority_level)
+        else:
+            logger.warning(f"Cannot set file priority: Torrent {info_hash} not found.")
+            self.error.emit(f"Cannot set file priority: Torrent {info_hash} not found.")
+            return False

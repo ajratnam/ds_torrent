@@ -1,0 +1,124 @@
+/* src/gui/style.qss */
+
+QWidget {
+    /* font-family: "Segoe UI", Arial, sans-serif; */ /* Example: Define a default font */
+    /* color: #cccccc; */
+    /* background-color: #2d2d2d; */
+}
+
+QTableWidget {
+    gridline-color: #454545;
+    /* background-color: #2d2d2d; */
+    /* alternate-background-color: #353535; */
+    /* color: #cccccc; */
+    /* selection-background-color: #505050; */
+}
+
+QHeaderView::section {
+    /* background-color: #383838; */
+    /* color: #cccccc; */
+    padding: 4px;
+    border: 1px solid #454545;
+}
+
+QTabWidget::pane {
+    border: 1px solid #454545;
+    /* background: #333333; */
+}
+
+QTabBar::tab {
+    /* background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #505050, stop: 0.4 #404040,
+                                stop: 0.5 #383838, stop: 1.0 #303030); */
+    border: 1px solid #454545;
+    border-bottom-color: #303030; /* same as pane border */
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+    min-width: 8ex;
+    padding: 5px 10px;
+    /* color: #cccccc; */
+}
+
+QTabBar::tab:selected, QTabBar::tab:hover {
+    /* background: qlineargradient(x1: 0, y1: 0, x2: 0, y2: 1,
+                                stop: 0 #303030, stop: 0.4 #383838,
+                                stop: 0.5 #404040, stop: 1.0 #505050); */
+    /* color: #ffffff; */
+}
+
+QTabBar::tab:selected {
+    border-color: #505050;
+    border-bottom-color: #383838; /* same as pane background */
+}
+
+QTabBar::tab:!selected {
+    margin-top: 2px; /* make non-selected tabs look smaller */
+}
+
+QPushButton {
+    /* background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #505050, stop:1 #303030); */
+    border: 1px solid #505050;
+    padding: 5px 10px;
+    border-radius: 4px;
+    /* color: #cccccc; */
+    min-width: 70px;
+}
+
+QPushButton:hover {
+    /* background-color: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #606060, stop:1 #404040); */
+    border: 1px solid #606060;
+}
+
+QPushButton:pressed {
+    /* background-color: #2d2d2d; */
+    border: 1px solid #454545;
+}
+
+QProgressBar {
+    border: 1px solid #505050;
+    border-radius: 4px;
+    text-align: center;
+    /* color: #cccccc; */
+    /* background-color: #383838; */
+}
+
+QProgressBar::chunk {
+    background-color: #0078d7; /* A modern blue */
+    /* background-color: qlineargradient(x1: 0, y1: 0, x2: 1, y2: 0, stop: 0 #0078d7, stop: 1 #0053a0); */
+    width: 10px; /* A wider chunk can look more modern */
+    margin: 0.5px;
+}
+
+QLineEdit {
+    padding: 3px;
+    border: 1px solid #505050;
+    border-radius: 3px;
+    /* background-color: #383838; */
+    /* color: #cccccc; */
+}
+
+/* Style for QSplitter handle */
+QSplitter::handle {
+    background-color: #383838; /* Darker handle */
+    border: 1px solid #454545;
+}
+
+QSplitter::handle:horizontal {
+    width: 5px;
+}
+
+QSplitter::handle:vertical {
+    height: 5px;
+}
+
+QSplitter::handle:pressed {
+    background-color: #505050; /* Lighter when pressed */
+}
+
+QStatusBar QLabel {
+    /* color: #cccccc; */
+    padding: 2px 5px;
+}
+
+/* Remove the custom progress bar styling from torrent_table.py if this is more general */
+/* In TorrentProgressBar class, remove or comment out self.setStyleSheet(...) */ 

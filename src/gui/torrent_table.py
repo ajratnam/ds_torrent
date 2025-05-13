@@ -3,24 +3,13 @@ from PyQt5.QtWidgets import (QTableWidget, QTableWidgetItem, QHeaderView,
                            QWidget, QHBoxLayout, QPushButton)
 from PyQt5.QtCore import Qt, pyqtSignal, QTimer
 from PyQt5.QtGui import QColor, QFont
+from datetime import datetime
 
 class TorrentProgressBar(QProgressBar):
     """Custom progress bar for torrent progress"""
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setTextVisible(True)
-        self.setStyleSheet("""
-            QProgressBar {
-                border: 1px solid #cccccc;
-                border-radius: 4px;
-                text-align: center;
-            }
-            QProgressBar::chunk {
-                background-color: #4CAF50;
-                width: 10px;
-                margin: 0.5px;
-            }
-        """)
 
 
 class TorrentTableWidget(QTableWidget):
@@ -34,10 +23,11 @@ class TorrentTableWidget(QTableWidget):
         super().__init__(parent)
         
         # Setup table properties
-        self.setColumnCount(8)
+        self.setColumnCount(11)  # Increased column count
         self.setHorizontalHeaderLabels([
             "Name", "Size", "Progress", "Status", 
-            "Seeds", "Peers", "Down Speed", "Up Speed"
+            "Seeds", "Peers", "Down Speed", "Up Speed",
+            "ETA", "Ratio", "Added On" # New columns
         ])
         
         # Setup table appearance
@@ -56,10 +46,13 @@ class TorrentTableWidget(QTableWidget):
         # Set column widths
         self.setColumnWidth(1, 80)   # Size
         self.setColumnWidth(3, 100)  # Status
-        self.setColumnWidth(4, 60)   # Seeds
-        self.setColumnWidth(5, 60)   # Peers
-        self.setColumnWidth(6, 100)  # Down Speed
-        self.setColumnWidth(7, 100)  # Up Speed
+        self.setColumnWidth(4, 70)   # Seeds (conn/total)
+        self.setColumnWidth(5, 70)   # Peers (conn/total)
+        self.setColumnWidth(6, 90)  # Down Speed
+        self.setColumnWidth(7, 90)  # Up Speed
+        self.setColumnWidth(8, 80)   # ETA
+        self.setColumnWidth(9, 60)   # Ratio
+        self.setColumnWidth(10, 120) # Added On
         
         # Store torrent info hashes for each row
         self.torrent_hashes = {}
@@ -87,13 +80,22 @@ class TorrentTableWidget(QTableWidget):
         # Set status
         self.setItem(row, 3, QTableWidgetItem(status['state']))
         
-        # Set seeds/peers
-        self.setItem(row, 4, QTableWidgetItem(str(status['num_seeds'])))
-        self.setItem(row, 5, QTableWidgetItem(str(status['num_peers'])))
+        # Set seeds/peers (Connected / Total in swarm)
+        self.setItem(row, 4, QTableWidgetItem(f"{status['num_seeds']} ({status['total_seeds']})"))
+        self.setItem(row, 5, QTableWidgetItem(f"{status['num_peers']} ({status['total_peers']})"))
         
         # Set speeds
         self.setItem(row, 6, QTableWidgetItem(f"{status['download_rate']:.1f} KB/s"))
         self.setItem(row, 7, QTableWidgetItem(f"{status['upload_rate']:.1f} KB/s"))
+        
+        # Set ETA
+        self.setItem(row, 8, QTableWidgetItem(self._format_eta(status['eta'])))
+        
+        # Set Ratio
+        self.setItem(row, 9, QTableWidgetItem(f"{status['ratio']:.2f}"))
+        
+        # Set Added On
+        self.setItem(row, 10, QTableWidgetItem(self._format_timestamp(status['added_on'])))
         
         # Store the info hash
         info_hash = str(torrent.handle.info_hash())
@@ -141,14 +143,25 @@ class TorrentTableWidget(QTableWidget):
         # Status
         self.item(row, 3).setText(status['state'])
         
-        # Seeds/Peers
-        self.item(row, 4).setText(str(status['num_seeds']))
-        self.item(row, 5).setText(str(status['num_peers']))
+        # Seeds/Peers (Connected / Total in swarm)
+        self.item(row, 4).setText(f"{status['num_seeds']} ({status['total_seeds']})")
+        self.item(row, 5).setText(f"{status['num_peers']} ({status['total_peers']})")
         
         # Speeds
         self.item(row, 6).setText(f"{status['download_rate']:.1f} KB/s")
         self.item(row, 7).setText(f"{status['upload_rate']:.1f} KB/s")
         
+        # ETA
+        self.item(row, 8).setText(self._format_eta(status['eta']))
+        
+        # Ratio
+        self.item(row, 9).setText(f"{status['ratio']:.2f}")
+        
+        # Added On (This generally doesn't change, but in case of a load, it's good to refresh)
+        # self.item(row, 10).setText(self._format_timestamp(status['added_on'])) 
+        # Added on should ideally be set once when the torrent is added or loaded from state.
+        # Re-setting it here on every status update might be redundant unless it can change.
+
         # Color coding based on status
         if status['state'] == 'downloading':
             self.item(row, 3).setForeground(QColor(0, 128, 0))  # Green
@@ -172,6 +185,40 @@ class TorrentTableWidget(QTableWidget):
                                      enumerate(sorted(self.torrent_hashes.keys()))}
                 break
                 
+    def _format_eta(self, seconds):
+        if seconds == float('inf') or seconds < 0:
+            return "∞"
+        
+        current_row = self.currentRow()
+        current_status = "unknown"
+        if current_row >= 0 and self.item(current_row, 3):
+            current_status = self.item(current_row, 3).text()
+
+        if seconds == 0 and current_status not in ["seeding", "finished", "paused"]:
+             return "Stalled"
+
+        days = int(seconds // 86400)
+        seconds %= 86400
+        hours = int(seconds // 3600)
+        seconds %= 3600
+        minutes = int(seconds // 60)
+        
+        if days > 0:
+            return f"{days}d {hours}h"
+        if hours > 0:
+            return f"{hours}h {minutes}m"
+        if minutes > 0:
+            return f"{minutes}m"
+        return "< 1m"
+
+    def _format_timestamp(self, timestamp):
+        try:
+            # Assuming timestamp is a float from time.time()
+            dt_object = datetime.fromtimestamp(timestamp)
+            return dt_object.strftime("%Y-%m-%d %H:%M:%S")
+        except TypeError: # Handle potential None or malformed
+            return "N/A"
+
     def show_context_menu(self, position):
         """Show context menu for torrent actions"""
         row = self.rowAt(position.y())

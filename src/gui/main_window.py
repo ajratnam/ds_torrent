@@ -8,7 +8,7 @@ from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QWidget, QVBoxLayout,
                             QTableWidget, QTableWidgetItem, QHeaderView,
                             QProgressBar, QFileDialog, QMessageBox, QComboBox,
                             QSplitter, QStatusBar, QAction, QMenu, QToolBar,
-                            QSystemTrayIcon, QInputDialog, QDialog)
+                            QSystemTrayIcon, QInputDialog, QDialog, QStyle)
 from PyQt5.QtCore import Qt, QSize, QTimer, pyqtSlot, QStandardPaths, QByteArray
 from PyQt5.QtGui import QIcon, QFont
 
@@ -22,6 +22,7 @@ from src.core.torrent_search import TorrentSearchEngine
 from src.gui.torrent_table import TorrentTableWidget
 from src.gui.search_tab import SearchTab
 from src.gui.settings_dialog import SettingsDialog
+from src.gui.torrent_detail_widget import TorrentDetailWidget
 
 APP_NAME = "PythonBitTorrentClient"
 STATE_FILE_NAME = "app_state.json"
@@ -174,13 +175,24 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(self.central_widget)
         self.main_layout = QVBoxLayout(self.central_widget)
         
-        # Create tab widget
+        # Create main splitter for torrents list and details view
+        self.main_splitter = QSplitter(Qt.Vertical)
+        self.main_layout.addWidget(self.main_splitter)
+
+        # Create tab widget (will go into the top part of the splitter)
         self.tab_widget = QTabWidget()
-        self.main_layout.addWidget(self.tab_widget)
+        self.main_splitter.addWidget(self.tab_widget)
         
         # Create tabs
         self.setup_torrents_tab()
         self.setup_search_tab()
+        
+        # Create the torrent detail widget
+        self.torrent_detail_widget = TorrentDetailWidget()
+        self.main_splitter.addWidget(self.torrent_detail_widget)
+        
+        # Adjust splitter sizes (e.g., 65% for table area, 35% for details)
+        self.main_splitter.setSizes([int(self.height() * 0.65), int(self.height() * 0.35)])
         
         # Setup toolbar
         self.setup_toolbar()
@@ -190,11 +202,17 @@ class MainWindow(QMainWindow):
         self.setStatusBar(self.statusbar)
         
         # Add status labels
-        self.status_dht = QLabel("DHT: Initializing...")
+        self.status_dht_icon = QLabel()
+        self.status_dht_label = QLabel("DHT: Initializing...")
         self.status_download = QLabel("↓ 0.0 KB/s")
         self.status_upload = QLabel("↑ 0.0 KB/s")
+
+        self.status_download.setMinimumWidth(100)
+        self.status_upload.setMinimumWidth(100)
+        self.status_dht_label.setMinimumWidth(120)
         
-        self.statusbar.addPermanentWidget(self.status_dht)
+        self.statusbar.addPermanentWidget(self.status_dht_icon)
+        self.statusbar.addPermanentWidget(self.status_dht_label)
         self.statusbar.addPermanentWidget(self.status_download)
         self.statusbar.addPermanentWidget(self.status_upload)
         
@@ -204,6 +222,9 @@ class MainWindow(QMainWindow):
         self.update_timer.timeout.connect(self.update_status)
         self.update_timer.start()
         
+        # Connect detail widget signals
+        self.torrent_detail_widget.file_priority_changed.connect(self.on_file_priority_changed)
+        
     def setup_toolbar(self):
         """Setup the main toolbar"""
         self.toolbar = QToolBar("Main Toolbar")
@@ -211,31 +232,31 @@ class MainWindow(QMainWindow):
         self.addToolBar(self.toolbar)
         
         # Add torrent action
-        self.action_add_torrent = QAction("Add Torrent", self)
+        self.action_add_torrent = QAction(self.style().standardIcon(QStyle.SP_FileIcon), "Add Torrent", self)
         self.action_add_torrent.triggered.connect(self.add_torrent_dialog)
         self.toolbar.addAction(self.action_add_torrent)
         
         # Add magnet link action
-        self.action_add_magnet = QAction("Add Magnet", self)
+        self.action_add_magnet = QAction(self.style().standardIcon(QStyle.SP_DirLinkIcon), "Add Magnet", self)
         self.action_add_magnet.triggered.connect(self.add_magnet_dialog)
         self.toolbar.addAction(self.action_add_magnet)
         
         self.toolbar.addSeparator()
         
         # Resume all action
-        self.action_resume_all = QAction("Resume All", self)
+        self.action_resume_all = QAction(self.style().standardIcon(QStyle.SP_MediaPlay), "Resume All", self)
         self.action_resume_all.triggered.connect(self.resume_all_torrents)
         self.toolbar.addAction(self.action_resume_all)
         
         # Pause all action
-        self.action_pause_all = QAction("Pause All", self)
+        self.action_pause_all = QAction(self.style().standardIcon(QStyle.SP_MediaPause), "Pause All", self)
         self.action_pause_all.triggered.connect(self.pause_all_torrents)
         self.toolbar.addAction(self.action_pause_all)
         
         self.toolbar.addSeparator()
         
         # Settings action
-        self.action_settings = QAction("Settings", self)
+        self.action_settings = QAction(self.style().standardIcon(QStyle.SP_FileDialogDetailedView), "Settings", self)
         self.action_settings.triggered.connect(self.show_settings)
         self.toolbar.addAction(self.action_settings)
         
@@ -258,6 +279,15 @@ class MainWindow(QMainWindow):
         # Connect download signal
         self.search_tab.download_torrent.connect(self.download_from_search)
         
+        # Table signals
+        self.torrent_table.pause_torrent.connect(self.pause_torrent)
+        self.torrent_table.resume_torrent.connect(self.resume_torrent)
+        self.torrent_table.remove_torrent.connect(self.handle_remove_torrent)
+        self.torrent_table.itemSelectionChanged.connect(self.on_torrent_selection_changed)
+        
+        # Search engine signals
+        self.search_engine.search_error.connect(self.on_error)
+        
     def connect_signals(self):
         """Connect all signals from core components to UI"""
         # Torrent client signals
@@ -269,6 +299,7 @@ class MainWindow(QMainWindow):
         self.torrent_table.pause_torrent.connect(self.pause_torrent)
         self.torrent_table.resume_torrent.connect(self.resume_torrent)
         self.torrent_table.remove_torrent.connect(self.handle_remove_torrent)
+        self.torrent_table.itemSelectionChanged.connect(self.on_torrent_selection_changed)
         
         # Search engine signals
         self.search_engine.search_error.connect(self.on_error)
@@ -302,9 +333,13 @@ class MainWindow(QMainWindow):
         # Update DHT status
         if self.torrent_client.session.is_dht_running():
             dht_nodes = self.torrent_client.session.status().dht_nodes
-            self.status_dht.setText(f"DHT: {dht_nodes} nodes")
+            self.status_dht_label.setText(f"DHT: {dht_nodes} nodes")
+            self.status_dht_icon.setPixmap(self.style().standardIcon(QStyle.SP_DialogApplyButton).pixmap(QSize(16,16))) # Green check / connected icon
+            self.status_dht_icon.setToolTip("DHT Connected")
         else:
-            self.status_dht.setText("DHT: Off")
+            self.status_dht_label.setText("DHT: Off")
+            self.status_dht_icon.setPixmap(self.style().standardIcon(QStyle.SP_DialogCancelButton).pixmap(QSize(16,16))) # Red X / disconnected icon
+            self.status_dht_icon.setToolTip("DHT Disconnected")
         
     def on_error(self, error_message):
         """Handle error messages"""
@@ -431,3 +466,49 @@ class MainWindow(QMainWindow):
             event.accept()
         else:
             event.ignore() 
+
+    def on_torrent_selection_changed(self):
+        selected_rows = self.torrent_table.selectionModel().selectedRows()
+        if not selected_rows:
+            # No selection, clear detail area
+            if hasattr(self, 'torrent_detail_widget'): 
+                 self.torrent_detail_widget.clear_details()
+            return
+
+        selected_row_index = selected_rows[0].row()
+        if selected_row_index < self.torrent_table.rowCount() and self.torrent_table.torrent_hashes.get(selected_row_index):
+            info_hash = self.torrent_table.torrent_hashes[selected_row_index]
+            if info_hash in self.torrent_client.torrents:
+                torrent_handle_obj = self.torrent_client.torrents[info_hash]
+                status = torrent_handle_obj.get_status()
+                
+                if hasattr(self, 'torrent_detail_widget') and status:
+                    self.torrent_detail_widget.update_details(status)
+            else:
+                # Info hash known by table but not by client (should be rare, implies inconsistency)
+                if hasattr(self, 'torrent_detail_widget'):
+                    self.torrent_detail_widget.clear_details()
+                    # Optionally, add a message like: self.torrent_detail_widget.lbl_name.setText("Error: Torrent data not found in client.")
+        else:
+             # Invalid row or info_hash not found in table's mapping
+             if hasattr(self, 'torrent_detail_widget'):
+                 self.torrent_detail_widget.clear_details()
+                 # Optionally, add a message like: self.torrent_detail_widget.lbl_name.setText("Please select a valid torrent.") 
+
+    @pyqtSlot(str, int, int)
+    def on_file_priority_changed(self, info_hash, file_index, priority_level):
+        success = self.torrent_client.set_torrent_file_priority(info_hash, file_index, priority_level)
+        if success:
+            # Refresh the torrent details to show the updated priority
+            # This assumes the status_updated signal from TorrentHandle will eventually update the table
+            # For immediate feedback in the detail panel, we can re-fetch and update here.
+            if info_hash in self.torrent_client.torrents:
+                status = self.torrent_client.torrents[info_hash].get_status()
+                if hasattr(self, 'torrent_detail_widget') and status:
+                    self.torrent_detail_widget.update_details(status)
+                # Also, request the main table to update that specific torrent's display if needed,
+                # though the TorrentHandle's status_updated signal should ideally cover this.
+                # self.torrent_table.update_torrent_status(status) 
+            QMessageBox.information(self, "Priority Set", f"Priority for file index {file_index} set to {priority_level}.")
+        else:
+            QMessageBox.warning(self, "Error", "Could not set file priority. Check logs.") 
