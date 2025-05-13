@@ -101,6 +101,7 @@ class MainWindow(QMainWindow):
             source = torrent_info.get('source')
             save_path = torrent_info.get('save_path')
             info_hash = torrent_info.get('info_hash')
+            is_completed = torrent_info.get('is_completed', False) # Load the flag, default to False
             
             if not source or not save_path or not info_hash:
                 print(f"Skipping invalid torrent entry: {torrent_info}")
@@ -115,7 +116,7 @@ class MainWindow(QMainWindow):
                 except IOError as e:
                     print(f"Error reading resume file {resume_file}: {e}")
             
-            self.torrent_client.add_torrent(source, save_path, resume_data_bytes)
+            self.torrent_client.add_torrent(source, save_path, resume_data_bytes, is_completed_on_load=is_completed)
         
         # Restore last active tab
         last_tab_index = state_data.get('last_tab_index', 0)
@@ -150,7 +151,8 @@ class MainWindow(QMainWindow):
             active_torrents_state.append({
                 'source': torrent_handle_obj.source,
                 'save_path': torrent_handle_obj.save_path,
-                'info_hash': info_hash
+                'info_hash': info_hash,
+                'is_completed': torrent_handle_obj.is_completed_flag # Save the flag
             })
         state_data['torrents'] = active_torrents_state
         
@@ -312,6 +314,7 @@ class MainWindow(QMainWindow):
         
         # Connect status update signal
         torrent.status_updated.connect(self.torrent_table.update_torrent_status)
+        torrent.status_updated.connect(self.refresh_active_torrent_details)
         torrent.completed.connect(self.on_torrent_completed)
         
     @pyqtSlot(dict)
@@ -459,10 +462,22 @@ class MainWindow(QMainWindow):
         
         if reply == QMessageBox.Yes:
             print("Saving application state before closing...")
-            self.save_app_state()
+            # Pause all torrents and trigger resume data save for each
+            for info_hash, torrent_handle_obj_wrapper in self.torrent_client.torrents.items():
+                if torrent_handle_obj_wrapper.handle.is_valid():
+                    print(f"Pausing and triggering save resume for {info_hash}")
+                    torrent_handle_obj_wrapper.pause() # Pause the torrent
+                    # Triggering save_resume_data again here ensures it's requested after pause
+                    self.torrent_client.trigger_save_resume_data(info_hash)
+
+            self.save_app_state() # This will again call trigger_save_resume_data for active ones, which is fine.
+            
             # Allow some time for async operations like resume data saving to be processed by libtorrent alerts
             # This is a simple delay; a more robust solution would use signals or event loops.
-            time.sleep(0.5) # Give alerts a moment to process
+            # Consider increasing this slightly if resume data still seems incomplete.
+            print("Waiting for resume data to be processed...")
+            time.sleep(1.0) # Increased sleep time slightly
+            print("Exiting.")
             event.accept()
         else:
             event.ignore() 
@@ -494,6 +509,14 @@ class MainWindow(QMainWindow):
              if hasattr(self, 'torrent_detail_widget'):
                  self.torrent_detail_widget.clear_details()
                  # Optionally, add a message like: self.torrent_detail_widget.lbl_name.setText("Please select a valid torrent.") 
+
+    @pyqtSlot(dict)
+    def refresh_active_torrent_details(self, status_dict):
+        if not hasattr(self, 'torrent_detail_widget') or not self.torrent_detail_widget._current_info_hash:
+            return # Detail widget not ready or no torrent selected in it
+        
+        if status_dict and status_dict.get('info_hash') == self.torrent_detail_widget._current_info_hash:
+            self.torrent_detail_widget.update_details(status_dict)
 
     @pyqtSlot(str, int, int)
     def on_file_priority_changed(self, info_hash, file_index, priority_level):

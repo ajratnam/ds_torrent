@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QFormLayout,
                             QTableWidgetItem, QHeaderView, QProgressBar,
                             QMenu, QAction)
 from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtGui import QColor # Import QColor
 import datetime
 import math # Import math module
 
@@ -34,9 +35,9 @@ class TorrentDetailWidget(QWidget):
 
         # Create tabs
         self._create_general_tab()
-        self._create_files_tab() # Uncomment and implement
-        # self._create_peers_tab() # Placeholder for future
-        # self._create_trackers_tab() # Placeholder for future
+        self._create_files_tab()
+        self._create_peers_tab()
+        # self._create_trackers_tab() # Remove this call
         # self._create_speed_tab() # Placeholder for future
 
     def _create_general_tab(self):
@@ -101,6 +102,43 @@ class TorrentDetailWidget(QWidget):
         
         layout.addWidget(self.files_table)
         self.tab_widget.addTab(self.files_tab, "Files")
+
+    def _create_peers_tab(self):
+        self.peers_tab = QWidget()
+        layout = QVBoxLayout(self.peers_tab)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        self.peers_table = QTableWidget()
+        self.peers_table.setColumnCount(9) # IP, Port, Client, Progress, Down, Up, Flags, Type, Source
+        self.peers_table.setHorizontalHeaderLabels([
+            "IP Address", "Port", "Client", "Progress", 
+            "Down Speed", "Up Speed", "Flags", "Conn. Type", "Source"
+        ])
+        self.peers_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.peers_table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.peers_table.verticalHeader().setVisible(False)
+        self.peers_table.setAlternatingRowColors(True)
+
+        header = self.peers_table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.Interactive) # IP Address
+        header.setSectionResizeMode(1, QHeaderView.Interactive) # Port
+        header.setSectionResizeMode(2, QHeaderView.Stretch)   # Client
+        header.setSectionResizeMode(3, QHeaderView.Interactive) # Progress
+        header.setSectionResizeMode(6, QHeaderView.Interactive) # Flags
+        header.setSectionResizeMode(7, QHeaderView.Interactive) # Conn. Type
+        header.setSectionResizeMode(8, QHeaderView.Interactive) # Source
+
+        self.peers_table.setColumnWidth(0, 120) # IP
+        self.peers_table.setColumnWidth(1, 50)  # Port
+        self.peers_table.setColumnWidth(3, 80)  # Progress
+        self.peers_table.setColumnWidth(4, 80)  # Down Speed
+        self.peers_table.setColumnWidth(5, 80)  # Up Speed
+        self.peers_table.setColumnWidth(6, 80)  # Flags
+        self.peers_table.setColumnWidth(7, 80)  # Conn. Type
+        self.peers_table.setColumnWidth(8, 80)  # Source
+        
+        layout.addWidget(self.peers_table)
+        self.tab_widget.addTab(self.peers_tab, "Peers")
 
     def _show_files_table_context_menu(self, position):
         selected_items = self.files_table.selectedItems()
@@ -221,6 +259,34 @@ class TorrentDetailWidget(QWidget):
                 self.files_table.setItem(0, 0, no_files_item)
                 self.files_table.setSpan(0, 0, 1, self.files_table.columnCount())
 
+        # Update peers tab
+        if hasattr(self, 'peers_table'):
+            self.peers_table.setRowCount(0)
+            peers_data = status_dict.get('peers', [])
+            if peers_data:
+                self.peers_table.setRowCount(len(peers_data))
+                for i, peer_info in enumerate(peers_data):
+                    self.peers_table.setItem(i, 0, QTableWidgetItem(peer_info.get('ip', 'N/A')))
+                    self.peers_table.setItem(i, 1, QTableWidgetItem(str(peer_info.get('port', 'N/A'))))
+                    self.peers_table.setItem(i, 2, QTableWidgetItem(peer_info.get('client', 'N/A')))
+                    
+                    progress_val = peer_info.get('progress', 0)
+                    # Using a simple text item for peer progress, can be changed to a bar if desired
+                    item_progress = QTableWidgetItem(f"{progress_val:.1f}%")
+                    self.peers_table.setItem(i, 3, item_progress)
+
+                    self.peers_table.setItem(i, 4, QTableWidgetItem(f"{peer_info.get('down_speed', 0):.1f} KB/s"))
+                    self.peers_table.setItem(i, 5, QTableWidgetItem(f"{peer_info.get('up_speed', 0):.1f} KB/s"))
+                    self.peers_table.setItem(i, 6, QTableWidgetItem(peer_info.get('flags', '-')))
+                    self.peers_table.setItem(i, 7, QTableWidgetItem(peer_info.get('connection_type', 'N/A')))
+                    self.peers_table.setItem(i, 8, QTableWidgetItem(peer_info.get('source', 'N/A')))
+            else:
+                self.peers_table.setRowCount(1)
+                no_peers_item = QTableWidgetItem("No peer information available.")
+                no_peers_item.setTextAlignment(Qt.AlignCenter)
+                self.peers_table.setItem(0, 0, no_peers_item)
+                self.peers_table.setSpan(0, 0, 1, self.peers_table.columnCount())
+
     def clear_details(self):
         self._current_info_hash = None # Clear stored info_hash
         self.lbl_name.setText("N/A")
@@ -239,6 +305,10 @@ class TorrentDetailWidget(QWidget):
         # Clear files tab
         if hasattr(self, 'files_table'):
             self.files_table.setRowCount(0)
+        
+        # Clear peers tab
+        if hasattr(self, 'peers_table'):
+            self.peers_table.setRowCount(0)
 
 # Example usage (for testing, not part of the final app flow here)
 if __name__ == '__main__':

@@ -6,7 +6,7 @@ from PyQt5.QtCore import QObject, pyqtSignal
 import logging
 
 # Setup logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 class TorrentHandle(QObject):
@@ -27,6 +27,7 @@ class TorrentHandle(QObject):
         self.added_on = time.time() # Timestamp when torrent was added
         self.num_pieces = 0
         self.piece_length = 0
+        self.is_completed_flag = False # New flag for completion status
         
     def get_status(self):
         """Get current status of the torrent"""
@@ -66,6 +67,7 @@ class TorrentHandle(QObject):
                             'priority': priority
                         })
                 self.files = file_statuses # Update self.files with detailed info
+
             else:
                 # For magnet links without metadata
                 name = "Fetching metadata..."
@@ -77,7 +79,32 @@ class TorrentHandle(QObject):
                     total_size = info.total_size()
                     self.num_pieces = info.num_pieces()
                     self.piece_length = info.piece_length()
-                
+            
+            # Get Peer Info
+            peer_list = []
+            if self.handle.is_valid(): # Ensure handle is valid before getting peer info
+                for peer_info in self.handle.get_peer_info():
+                    # Decode client name if possible
+                    client_name = peer_info.client.decode('utf-8', 'ignore') if peer_info.client else "N/A"
+                    # Format flags
+                    flags_str = self._format_peer_flags(peer_info.flags)
+                    conn_type_str = self._format_connection_type(peer_info.connection_type)
+
+                    # Log raw peer progress
+                    logger.debug(f"Peer {peer_info.ip[0]}:{peer_info.ip[1]} raw progress: {peer_info.progress}, client: {client_name}")
+
+                    peer_list.append({
+                        'ip': peer_info.ip[0],
+                        'port': peer_info.ip[1],
+                        'client': client_name,
+                        'progress': peer_info.progress * 100,
+                        'down_speed': peer_info.down_speed / 1024,
+                        'up_speed': peer_info.up_speed / 1024,
+                        'flags': flags_str,
+                        'connection_type': conn_type_str,
+                        'source': self._format_peer_source_flags(peer_info.source) # e.g., DHT, PEX, LPD
+                    })
+
             # Determine state and speeds
             if status.paused:
                 state = "paused"
@@ -118,7 +145,8 @@ class TorrentHandle(QObject):
                 'num_pieces': self.num_pieces,
                 'piece_length': self.piece_length,
                 'distributed_copies': status.distributed_copies, # Availability
-                'files': self.files if self.handle.has_metadata() else [] # Add files list to status_dict
+                'files': self.files if self.handle.has_metadata() else [], # Add files list to status_dict
+                'peers': peer_list
             }
             
             return status_dict
@@ -201,6 +229,62 @@ class TorrentHandle(QObject):
             self.error.emit(str(self.handle.info_hash()), f"Error setting file priority: {str(e)}")
             return False
 
+    # Helper methods for formatting peer info
+    def _format_peer_flags(self, flags):
+        flag_map = {
+            lt.peer_info.interesting: "I", # We are interested in the peer
+            lt.peer_info.choked: "C",       # We are choked by the peer
+            lt.peer_info.remote_interested: "i", # Peer is interested in us
+            lt.peer_info.remote_choked: "c",   # Peer is choked by us
+            lt.peer_info.supports_extensions: "E", # Supports extensions
+            lt.peer_info.outgoing_connection: "O", # Outgoing connection
+            lt.peer_info.handshake: "H",         # Handshake completed
+            lt.peer_info.connecting: "N",      # Connecting
+            lt.peer_info.on_parole: "P",         # On parole (optimistic unchoke)
+            lt.peer_info.seed: "S",              # Peer is a seed
+            lt.peer_info.optimistic_unchoke: "U", # Optimistic unchoke
+            lt.peer_info.snubbed: "X",           # Snubbed
+            lt.peer_info.upload_only: "L",     # Upload only
+            lt.peer_info.endgame_mode: "G",    # In endgame mode
+            lt.peer_info.holepunched: "V",     # Holepunched
+            # lt.peer_info.local_connection: "LC", # This might conflict with upload_only 'L' if not careful
+        }
+        s = []
+        for flag, char in flag_map.items():
+            if flags & flag:
+                s.append(char)
+        return "".join(s) if s else "-"
+
+    def _format_connection_type(self, conn_type):
+        conn_map = {
+            lt.peer_info.standard_bittorrent: "BT", # Generic BitTorrent connection
+            lt.peer_info.web_seed: "Web",
+            lt.peer_info.http_seed: "HTTP",
+            # We are removing explicit uTP detection for now due to compatibility issues
+            # lt.peer_info.bittorrent_utp: "uTP" 
+        }
+        
+        formatted_type = conn_map.get(conn_type)
+        if formatted_type:
+            return formatted_type
+        else:
+            return f"Unknown({conn_type})"
+
+    def _format_peer_source_flags(self, source_flags):
+        source_map = {
+            lt.peer_info.tracker: "Tr",
+            lt.peer_info.dht: "DHT",
+            lt.peer_info.pex: "PEX",
+            lt.peer_info.lsd: "LSD",
+            lt.peer_info.resume_data: "Res"
+            # Removed incoming_connection due to persistent errors
+            # lt.peer_info.incoming_connection: "In" 
+        }
+        s = []
+        for flag, char in source_map.items():
+            if source_flags & flag:
+                s.append(char)
+        return ",".join(s) if s else "-"
 
 class TorrentClient(QObject):
     """Main torrent client class that manages the libtorrent session"""
@@ -260,7 +344,7 @@ class TorrentClient(QObject):
     def _get_resume_filepath(self, info_hash_str):
         return os.path.join(self.resume_data_dir, f"{info_hash_str}.fastresume")
 
-    def add_torrent(self, source, save_path, resume_data_bytes=None):
+    def add_torrent(self, source, save_path, resume_data_bytes=None, is_completed_on_load=False):
         """
         Add a new torrent
         
@@ -268,6 +352,7 @@ class TorrentClient(QObject):
             source: Either a magnet link or path to a .torrent file
             save_path: Directory to save downloaded files
             resume_data_bytes: Optional bytes for resuming a torrent
+            is_completed_on_load: Boolean indicating if the torrent should be marked as completed on load
         
         Returns:
             TorrentHandle object
@@ -282,6 +367,9 @@ class TorrentClient(QObject):
                     # Set flags for magnet links
                     params.flags |= lt.torrent_flags.auto_managed
                     params.flags &= ~lt.torrent_flags.paused
+                    if is_completed_on_load and resume_data_bytes:
+                        params.flags |= lt.torrent_flags.seed_mode
+                        logger.info(f"Adding completed magnet {source[:50]}... in seed_mode.")
                     if resume_data_bytes:
                         params.resume_data = resume_data_bytes
                 except Exception as e:
@@ -297,6 +385,9 @@ class TorrentClient(QObject):
                     # Set flags for torrent files
                     params.flags |= lt.torrent_flags.auto_managed
                     params.flags &= ~lt.torrent_flags.paused
+                    if is_completed_on_load and resume_data_bytes: # Also for .torrent files if marked completed
+                        params.flags |= lt.torrent_flags.seed_mode
+                        logger.info(f"Adding completed torrent file {source} in seed_mode.")
                     if resume_data_bytes:
                         params.resume_data = resume_data_bytes
                 except Exception as e:
@@ -313,6 +404,10 @@ class TorrentClient(QObject):
             # Create a handle object
             torrent = TorrentHandle(handle, save_path, source) # Pass source here
             
+            # If loaded as completed, ensure the internal flag is also set
+            if is_completed_on_load:
+                torrent.is_completed_flag = True
+
             # Store the handle
             info_hash = str(handle.info_hash())
             self.torrents[info_hash] = torrent
@@ -320,6 +415,13 @@ class TorrentClient(QObject):
             # Start the torrent
             handle.set_sequential_download(False)
             handle.set_priority(1)
+            
+            # If resume data was provided, or if it's a file-based torrent (not magnet initially)
+            # it's often good to ensure files are checked.
+            if resume_data_bytes or not source.startswith('magnet:'):
+                if handle.is_valid(): # Check if handle is still valid
+                    print(f"Forcing recheck for torrent: {name if 'name' in locals() else info_hash}")
+                    handle.force_recheck()
             
             # For torrent files, verify files exist
             if not source.startswith('magnet:'):
@@ -353,10 +455,11 @@ class TorrentClient(QObject):
                 # The actual saving happens via alert.
                 torrent_handle_obj = self.torrents[info_hash].handle
                 if torrent_handle_obj.is_valid():
-                    torrent_handle_obj.save_resume_data() 
+                    torrent_handle_obj.save_resume_data(lt.torrent_handle.save_info_dict)
+                    logger.info(f"Requested resume data save (with info_dict) for {info_hash} before removal.")
 
                 # Now remove from session
-                self.session.remove_torrent(self.torrents[info_hash].handle, lt.session_handle.delete_files if delete_files else 0)
+                self.session.remove_torrent(self.torrents[info_hash].handle, lt.session.delete_files if delete_files else 0)
                 
                 # Delete the resume data file
                 resume_filepath = self._get_resume_filepath(info_hash)
@@ -377,8 +480,9 @@ class TorrentClient(QObject):
         if info_hash_str in self.torrents:
             handle = self.torrents[info_hash_str].handle
             if handle.is_valid():
-                handle.save_resume_data() # Request flags can be added here if needed
-                logger.info(f"Requested resume data save for {info_hash_str}")
+                # Request flags can be added here if needed
+                handle.save_resume_data(lt.torrent_handle.save_info_dict) 
+                logger.info(f"Requested resume data save (with info_dict) for {info_hash_str}")
             else:
                 logger.warning(f"Cannot save resume data, handle invalid for {info_hash_str}")
         else:
@@ -398,9 +502,10 @@ class TorrentClient(QObject):
                         if info_hash_str and info_hash_str in self.torrents:
                             logger.info(f"Metadata received for torrent: {info_hash_str}")
                             # Force a status update, which will repopulate .info
-                            status = self.torrents[info_hash_str].get_status()
+                            torrent_obj = self.torrents[info_hash_str]
+                            status = torrent_obj.get_status()
                             if status:
-                                self.torrents[info_hash_str].status_updated.emit(status)
+                                torrent_obj.status_updated.emit(status)
                                 
                     elif isinstance(alert, lt.metadata_failed_alert):
                         if info_hash_str and info_hash_str in self.torrents:
@@ -416,11 +521,18 @@ class TorrentClient(QObject):
                     elif isinstance(alert, lt.torrent_finished_alert):
                         if info_hash_str and info_hash_str in self.torrents:
                             logger.info(f"Torrent finished: {info_hash_str}")
-                            self.torrents[info_hash_str].completed.emit(info_hash_str)
-                            # Ensure status reflects completion
-                            status = self.torrents[info_hash_str].get_status()
+                            torrent_obj = self.torrents[info_hash_str]
+                            
+                            should_notify = not torrent_obj.is_completed_flag # Check flag BEFORE setting it
+                            torrent_obj.is_completed_flag = True # Set the flag
+
+                            if should_notify:
+                                torrent_obj.completed.emit(info_hash_str) # Only emit if it wasn't already complete
+                            
+                            # Ensure status reflects completion anyway for UI updates
+                            status = torrent_obj.get_status()
                             if status:
-                                 self.torrents[info_hash_str].status_updated.emit(status)
+                                 torrent_obj.status_updated.emit(status)
                                  
                     elif isinstance(alert, lt.torrent_error_alert):
                         if info_hash_str and info_hash_str in self.torrents:
