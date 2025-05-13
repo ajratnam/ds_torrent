@@ -320,7 +320,7 @@ class MainWindow(QMainWindow):
         # Style status bar labels for better visibility
         for status_label_widget in [self.status_dht_icon, self.status_dht_label, self.status_download, self.status_upload]:
             status_label_widget.setStyleSheet("padding: 2px 5px; color: #C0C0C0; background-color: transparent;")
-
+        
         # Setup update timer for status
         self.update_timer = QTimer()
         self.update_timer.setInterval(1000)
@@ -343,7 +343,7 @@ class MainWindow(QMainWindow):
         # For this example, I'll use a mix of QStyle icons and placeholders
         # You should replace placeholders with actual paths to your custom icons
         icons_dir = os.path.join(os.path.dirname(__file__), "icons")
-
+        
         # Add torrent action
         # Placeholder: add_file_icon.png or a similar modern icon
         add_torrent_icon_path = os.path.join(icons_dir, "add_torrent_file.png") 
@@ -467,7 +467,7 @@ class MainWindow(QMainWindow):
         
         # Settings action
         # (settings_icon setup is in setup_toolbar)
-
+        
     def connect_signals(self):
         """Connect all signals from core components to UI"""
         # Torrent client signals
@@ -595,7 +595,7 @@ class MainWindow(QMainWindow):
             }
         """)
         msg_box.exec_()
-
+        
     def add_torrent_dialog(self):
         """Show dialog to add a torrent file"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -677,7 +677,7 @@ class MainWindow(QMainWindow):
         # If the removed torrent was selected, clear details view
         if hasattr(self, 'torrent_detail_widget') and self.torrent_detail_widget._current_info_hash == info_hash:
             self.torrent_detail_widget.clear_details()
-
+        
     def pause_all_torrents(self):
         """Pause all torrents"""
         for torrent in self.torrent_client.torrents.values():

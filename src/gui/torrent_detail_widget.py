@@ -2,10 +2,14 @@ from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QFormLayout,
                             QLabel, QLineEdit, QGroupBox, QTableWidget, 
                             QTableWidgetItem, QHeaderView, QProgressBar,
                             QMenu, QAction)
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtGui import QColor, QPainter # Import QPainter
+from PyQt5.QtCore import Qt, pyqtSignal, QDateTime, QPointF # Add QDateTime and QPointF
+from PyQt5.QtGui import QColor, QPainter, QPen, QBrush # Import QPen, QBrush
+from PyQt5.QtChart import QChart, QChartView, QLineSeries, QDateTimeAxis, QValueAxis # Add QtChart imports
 import datetime
 import math # Import math module
+from collections import deque # For capped history
+
+SPEED_HISTORY_LENGTH = 60 # Number of data points for speed graphs
 
 def _format_bytes(size_bytes):
     if size_bytes == 0:
@@ -125,6 +129,7 @@ class TorrentDetailWidget(QWidget):
         self._create_general_tab()
         self._create_files_tab()
         self._create_peers_tab()
+        self._create_speed_tab() # Add call to create speed tab
         # self._create_trackers_tab() # Remove this call
         # self._create_speed_tab() # Placeholder for future
 
@@ -182,6 +187,103 @@ class TorrentDetailWidget(QWidget):
         layout.addWidget(self.peers_table)
         self.tab_widget.addTab(self.peers_tab_page, "Peers")
 
+    def _create_speed_tab(self):
+        self.speed_tab_page = QWidget()
+        layout = QVBoxLayout(self.speed_tab_page)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        # Download Speed Chart
+        self.dl_chart = QChart()
+        self.dl_chart.setTitle("Download Speed")
+        self.dl_series = QLineSeries()
+        self.dl_series.setName("KB/s")
+        self.dl_chart.addSeries(self.dl_series)
+
+        # --- Dark Theme Styling for Download Chart ---
+        self.dl_chart.setBackgroundBrush(QBrush(QColor("#2B2B2B")))
+        self.dl_chart.setTitleBrush(QBrush(QColor("#E0E0E0")))
+        
+        pen_dl = QPen(QColor("#40E0D0")) # Teal color for download line
+        pen_dl.setWidth(2)
+        self.dl_series.setPen(pen_dl)
+
+        # Legend styling (if shown)
+        legend_dl = self.dl_chart.legend()
+        legend_dl.setLabelColor(QColor("#E0E0E0"))
+        legend_dl.setBackgroundVisible(False) # Transparent background for legend
+        # legend_dl.hide() # Keep hidden for now, or unhide if preferred
+
+        axis_x_dl = QDateTimeAxis()
+        axis_x_dl.setFormat("hh:mm:ss")
+        axis_x_dl.setTitleText("Time")
+        axis_x_dl.setTitleBrush(QBrush(QColor("#E0E0E0")))
+        axis_x_dl.setLabelsColor(QColor("#C0C0C0"))
+        axis_x_dl.setGridLinePen(QPen(QColor("#3C3F41")))
+        self.dl_chart.addAxis(axis_x_dl, Qt.AlignBottom)
+        self.dl_series.attachAxis(axis_x_dl)
+
+        self.axis_y_dl = QValueAxis() 
+        self.axis_y_dl.setTitleText("Speed (KB/s)")
+        self.axis_y_dl.setMin(0)
+        self.axis_y_dl.setTitleBrush(QBrush(QColor("#E0E0E0")))
+        self.axis_y_dl.setLabelsColor(QColor("#C0C0C0"))
+        self.axis_y_dl.setGridLinePen(QPen(QColor("#3C3F41")))
+        self.dl_chart.addAxis(self.axis_y_dl, Qt.AlignLeft)
+        self.dl_series.attachAxis(self.axis_y_dl)
+
+        self.dl_chart_view = QChartView(self.dl_chart)
+        self.dl_chart_view.setRenderHint(QPainter.Antialiasing)
+        layout.addWidget(self.dl_chart_view)
+
+        # Upload Speed Chart
+        self.ul_chart = QChart()
+        self.ul_chart.setTitle("Upload Speed")
+        self.ul_series = QLineSeries()
+        self.ul_series.setName("KB/s")
+        self.ul_chart.addSeries(self.ul_series)
+
+        # --- Dark Theme Styling for Upload Chart ---
+        self.ul_chart.setBackgroundBrush(QBrush(QColor("#2B2B2B")))
+        self.ul_chart.setTitleBrush(QBrush(QColor("#E0E0E0")))
+
+        pen_ul = QPen(QColor("#FFA000")) # Amber/Orange color for upload line
+        pen_ul.setWidth(2)
+        self.ul_series.setPen(pen_ul)
+
+        # Legend styling (if shown)
+        legend_ul = self.ul_chart.legend()
+        legend_ul.setLabelColor(QColor("#E0E0E0"))
+        legend_ul.setBackgroundVisible(False)
+        # legend_ul.hide()
+
+        axis_x_ul = QDateTimeAxis()
+        axis_x_ul.setFormat("hh:mm:ss")
+        axis_x_ul.setTitleText("Time")
+        axis_x_ul.setTitleBrush(QBrush(QColor("#E0E0E0")))
+        axis_x_ul.setLabelsColor(QColor("#C0C0C0"))
+        axis_x_ul.setGridLinePen(QPen(QColor("#3C3F41")))
+        self.ul_chart.addAxis(axis_x_ul, Qt.AlignBottom)
+        self.ul_series.attachAxis(axis_x_ul)
+
+        self.axis_y_ul = QValueAxis() 
+        self.axis_y_ul.setTitleText("Speed (KB/s)")
+        self.axis_y_ul.setMin(0)
+        self.axis_y_ul.setTitleBrush(QBrush(QColor("#E0E0E0")))
+        self.axis_y_ul.setLabelsColor(QColor("#C0C0C0"))
+        self.axis_y_ul.setGridLinePen(QPen(QColor("#3C3F41")))
+        self.ul_chart.addAxis(self.axis_y_ul, Qt.AlignLeft)
+        self.ul_series.attachAxis(self.axis_y_ul)
+
+        self.ul_chart_view = QChartView(self.ul_chart)
+        self.ul_chart_view.setRenderHint(QPainter.Antialiasing)
+        layout.addWidget(self.ul_chart_view)
+
+        self.tab_widget.addTab(self.speed_tab_page, "Speed")
+
+        # Initialize speed history deques
+        self.dl_speed_history = deque(maxlen=SPEED_HISTORY_LENGTH)
+        self.ul_speed_history = deque(maxlen=SPEED_HISTORY_LENGTH)
+
     def _show_files_table_context_menu(self, position):
         selected_items = self.files_table.selectedItems()
         if not selected_items or self._current_info_hash is None:
@@ -231,7 +333,11 @@ class TorrentDetailWidget(QWidget):
             self.clear_details()
             return
         
-        self._current_info_hash = status_dict.get('info_hash') # Store info_hash
+        current_info_hash = status_dict.get('info_hash')
+        if self._current_info_hash != current_info_hash: # Torrent has changed
+            self.clear_details() # Clear everything including speed history
+        
+        self._current_info_hash = current_info_hash # Store info_hash
 
         self.lbl_name.setText(status_dict.get('name', 'N/A'))
         self.lbl_name.setToolTip(status_dict.get('name', 'N/A'))
@@ -353,7 +459,60 @@ class TorrentDetailWidget(QWidget):
                 self.peers_table.setRowCount(0) # No peers, placeholder will show "No connected peers"
             self.peers_table.viewport().update()
 
+        # Update speed charts
+        now_ms = QDateTime.currentMSecsSinceEpoch()
+        dl_rate = status_dict.get('download_rate', 0.0) # KB/s
+        ul_rate = status_dict.get('upload_rate', 0.0)   # KB/s
+
+        self.dl_speed_history.append((now_ms, dl_rate))
+        self.ul_speed_history.append((now_ms, ul_rate))
+
+        # Update Download Series
+        new_dl_points = [QPointF(ts, speed) for ts, speed in self.dl_speed_history]
+        self.dl_series.replace(new_dl_points)
+        
+        # Update Upload Series
+        new_ul_points = [QPointF(ts, speed) for ts, speed in self.ul_speed_history]
+        self.ul_series.replace(new_ul_points)
+
+        # Adjust axes if history is not empty
+        if self.dl_speed_history:
+            min_time_dl = self.dl_speed_history[0][0]
+            max_time_dl = self.dl_speed_history[-1][0]
+            max_speed_dl = max(s for _, s in self.dl_speed_history) if self.dl_speed_history else 10
+            
+            self.dl_chart.axisX(self.dl_series).setMin(QDateTime.fromMSecsSinceEpoch(min_time_dl))
+            self.dl_chart.axisX(self.dl_series).setMax(QDateTime.fromMSecsSinceEpoch(max_time_dl if max_time_dl > min_time_dl else min_time_dl + 1000))
+            self.axis_y_dl.setMax(max(10.0, max_speed_dl * 1.1)) # Ensure a minimum range and some padding
+
+        if self.ul_speed_history:
+            min_time_ul = self.ul_speed_history[0][0]
+            max_time_ul = self.ul_speed_history[-1][0]
+            max_speed_ul = max(s for _, s in self.ul_speed_history) if self.ul_speed_history else 10
+
+            self.ul_chart.axisX(self.ul_series).setMin(QDateTime.fromMSecsSinceEpoch(min_time_ul))
+            self.ul_chart.axisX(self.ul_series).setMax(QDateTime.fromMSecsSinceEpoch(max_time_ul if max_time_ul > min_time_ul else min_time_ul + 1000))
+            self.axis_y_ul.setMax(max(10.0, max_speed_ul * 1.1))
+
     def clear_details(self):
+        # Clear speed history and charts first
+        if hasattr(self, 'dl_series'): self.dl_series.clear()
+        if hasattr(self, 'ul_series'): self.ul_series.clear()
+        if hasattr(self, 'dl_speed_history'): self.dl_speed_history.clear()
+        if hasattr(self, 'ul_speed_history'): self.ul_speed_history.clear()
+
+        # Reset Y-axis max for speed charts to a default
+        if hasattr(self, 'axis_y_dl'): self.axis_y_dl.setMax(10)
+        if hasattr(self, 'axis_y_ul'): self.axis_y_ul.setMax(10)
+        # Optionally reset X-axis time range too, or let it be empty
+        current_time = QDateTime.currentDateTime()
+        if hasattr(self, 'dl_chart') and self.dl_chart.axisX(self.dl_series):
+            self.dl_chart.axisX(self.dl_series).setMin(current_time.addSecs(-SPEED_HISTORY_LENGTH))
+            self.dl_chart.axisX(self.dl_series).setMax(current_time)
+        if hasattr(self, 'ul_chart') and self.ul_chart.axisX(self.ul_series):
+            self.ul_chart.axisX(self.ul_series).setMin(current_time.addSecs(-SPEED_HISTORY_LENGTH))
+            self.ul_chart.axisX(self.ul_series).setMax(current_time)
+            
         self._current_info_hash = None # Clear stored info_hash
         self.lbl_name.setText("Select a torrent to see details")
         self.lbl_save_path.setText("N/A")
