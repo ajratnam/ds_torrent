@@ -3,11 +3,17 @@ import time
 import os
 from threading import Thread
 from PyQt5.QtCore import QObject, pyqtSignal
+import logging
+
+# Setup logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class TorrentHandle(QObject):
     """Class representing a single torrent download"""
     status_updated = pyqtSignal(dict)
     completed = pyqtSignal(str)
+    error = pyqtSignal(str, str)  # info_hash, error_message
     
     def __init__(self, handle, save_path):
         super().__init__()
@@ -16,83 +22,111 @@ class TorrentHandle(QObject):
         self.info = None
         self.files = []
         self.torrent_file = None
+        self.last_error = None
         
     def get_status(self):
         """Get current status of the torrent"""
-        status = self.handle.status()
-        
-        # Get name and size if we have metadata
-        if self.handle.has_metadata():
-            if not self.info:
-                self.info = self.handle.get_torrent_info()
-                if hasattr(self.info, 'torrent_file'):
-                    self.torrent_file = self.info.torrent_file()
-                self.files = [self.info.files().file_path(i) for i in range(self.info.files().num_files())]
+        try:
+            status = self.handle.status()
             
-            name = self.handle.name()
-            total_size = self.info.total_size()
-        else:
-            # For magnet links without metadata
-            name = "Fetching metadata..."
-            total_size = 0
-            # Get progress from DHT
-            if status.has_metadata:
+            # Get name and size if we have metadata
+            if self.handle.has_metadata():
+                if not self.info:
+                    self.info = self.handle.get_torrent_info()
+                    if hasattr(self.info, 'torrent_file'):
+                        self.torrent_file = self.info.torrent_file()
+                    self.files = [self.info.files().file_path(i) for i in range(self.info.files().num_files())]
+                
                 name = self.handle.name()
-                total_size = self.handle.get_torrent_info().total_size()
+                total_size = self.info.total_size()
+            else:
+                # For magnet links without metadata
+                name = "Fetching metadata..."
+                total_size = 0
+                # Get progress from DHT
+                if status.has_metadata:
+                    name = self.handle.name()
+                    total_size = self.handle.get_torrent_info().total_size()
+                
+            # Determine state and speeds
+            if status.paused:
+                state = "paused"
+                download_rate = 0
+                upload_rate = 0
+            else:
+                state = status.state.name
+                download_rate = status.download_rate / 1024
+                upload_rate = status.upload_rate / 1024
+                
+            # Build status dictionary
+            status_dict = {
+                'name': name,
+                'save_path': self.save_path,
+                'progress': status.progress * 100,
+                'download_rate': download_rate,
+                'upload_rate': upload_rate,
+                'state': state,
+                'num_seeds': status.num_seeds,
+                'num_peers': status.num_peers,
+                'total_download': status.total_download / (1024 * 1024),
+                'total_upload': status.total_upload / (1024 * 1024),
+                'total_size': total_size,
+                'has_metadata': status.has_metadata,
+                'info_hash': str(self.handle.info_hash()),
+                'error': self.last_error
+            }
             
-        # Determine state and speeds
-        if status.paused:
-            state = "paused"
-            download_rate = 0
-            upload_rate = 0
-        else:
-            state = status.state.name
-            download_rate = status.download_rate / 1024
-            upload_rate = status.upload_rate / 1024
+            return status_dict
             
-        # Build status dictionary
-        status_dict = {
-            'name': name,
-            'save_path': self.save_path,
-            'progress': status.progress * 100,
-            'download_rate': download_rate,
-            'upload_rate': upload_rate,
-            'state': state,
-            'num_seeds': status.num_seeds,
-            'num_peers': status.num_peers,
-            'total_download': status.total_download / (1024 * 1024),
-            'total_upload': status.total_upload / (1024 * 1024),
-            'total_size': total_size,
-            'has_metadata': status.has_metadata,
-            'info_hash': str(self.handle.info_hash())
-        }
-        
-        return status_dict
+        except Exception as e:
+            logger.error(f"Error getting torrent status: {str(e)}")
+            self.last_error = str(e)
+            self.error.emit(str(self.handle.info_hash()), str(e))
+            return None
         
     def pause(self):
         """Pause the torrent"""
-        self.handle.pause()
-        # Force a status update with zero speeds
-        status = self.get_status()
-        status['download_rate'] = 0
-        status['upload_rate'] = 0
-        self.status_updated.emit(status)
+        try:
+            self.handle.pause()
+            # Force a status update with zero speeds
+            status = self.get_status()
+            if status:
+                status['download_rate'] = 0
+                status['upload_rate'] = 0
+                self.status_updated.emit(status)
+        except Exception as e:
+            logger.error(f"Error pausing torrent: {str(e)}")
+            self.last_error = str(e)
+            self.error.emit(str(self.handle.info_hash()), str(e))
         
     def resume(self):
         """Resume the torrent"""
-        self.handle.resume()
-        # Force a status update
-        self.status_updated.emit(self.get_status())
+        try:
+            self.handle.resume()
+            # Force a status update
+            status = self.get_status()
+            if status:
+                self.status_updated.emit(status)
+        except Exception as e:
+            logger.error(f"Error resuming torrent: {str(e)}")
+            self.last_error = str(e)
+            self.error.emit(str(self.handle.info_hash()), str(e))
         
     def remove(self, delete_files=False):
         """Remove the torrent"""
-        lt.session().remove_torrent(self.handle, int(delete_files))
+        try:
+            lt.session().remove_torrent(self.handle, int(delete_files))
+        except Exception as e:
+            logger.error(f"Error removing torrent: {str(e)}")
+            self.last_error = str(e)
+            self.error.emit(str(self.handle.info_hash()), str(e))
 
 
 class TorrentClient(QObject):
     """Main torrent client class that manages the libtorrent session"""
     torrent_added = pyqtSignal(object)
     client_status_updated = pyqtSignal(dict)
+    error = pyqtSignal(str)  # error_message
     
     def __init__(self):
         super().__init__()
@@ -107,7 +141,13 @@ class TorrentClient(QObject):
             'enable_lsd': True,
             'enable_natpmp': True,
             'enable_upnp': True,
-            'listen_interfaces': '0.0.0.0:6881'
+            'listen_interfaces': '0.0.0.0:6881',
+            'download_rate_limit': 0,  # No limit
+            'upload_rate_limit': 0,    # No limit
+            'active_downloads': -1,    # No limit
+            'active_seeds': -1,        # No limit
+            'active_limit': -1,        # No limit
+            'dht_bootstrap_nodes': 'router.bittorrent.com:6881,router.utorrent.com:6881,dht.transmissionbt.com:6881'
         }
         self.session.apply_settings(settings)
         
@@ -149,16 +189,22 @@ class TorrentClient(QObject):
                     params.flags |= lt.torrent_flags.auto_managed
                     params.flags &= ~lt.torrent_flags.paused
                 except Exception as e:
-                    print(f"Error parsing magnet link: {str(e)}")
+                    logger.error(f"Error parsing magnet link: {str(e)}")
+                    self.error.emit(f"Error parsing magnet link: {str(e)}")
                     return None
             # Handle torrent files
             else:
-                # Load the .torrent file
-                info = lt.torrent_info(source)
-                params.ti = info
-                # Set flags for torrent files
-                params.flags |= lt.torrent_flags.auto_managed
-                params.flags &= ~lt.torrent_flags.paused
+                try:
+                    # Load the .torrent file
+                    info = lt.torrent_info(source)
+                    params.ti = info
+                    # Set flags for torrent files
+                    params.flags |= lt.torrent_flags.auto_managed
+                    params.flags &= ~lt.torrent_flags.paused
+                except Exception as e:
+                    logger.error(f"Error loading torrent file: {str(e)}")
+                    self.error.emit(f"Error loading torrent file: {str(e)}")
+                    return None
             
             # Set save path
             params.save_path = save_path
@@ -184,7 +230,11 @@ class TorrentClient(QObject):
                     if not os.path.exists(save_path):
                         os.makedirs(save_path)
                 except Exception as e:
-                    print(f"Error during torrent initialization: {str(e)}")
+                    logger.error(f"Error creating save directory: {str(e)}")
+                    self.error.emit(f"Error creating save directory: {str(e)}")
+            
+            # Connect error signal
+            torrent.error.connect(lambda info_hash, msg: self.error.emit(f"Torrent {info_hash}: {msg}"))
             
             # Emit the signal
             self.torrent_added.emit(torrent)
@@ -192,52 +242,75 @@ class TorrentClient(QObject):
             return torrent
             
         except Exception as e:
-            print(f"Error adding torrent: {str(e)}")
+            logger.error(f"Error adding torrent: {str(e)}")
+            self.error.emit(f"Error adding torrent: {str(e)}")
             return None
     
     def remove_torrent(self, info_hash, delete_files=False):
         """Remove a torrent by its info hash"""
         if info_hash in self.torrents:
-            torrent = self.torrents[info_hash]
-            torrent.remove(delete_files)
-            del self.torrents[info_hash]
+            try:
+                torrent = self.torrents[info_hash]
+                torrent.remove(delete_files)
+                del self.torrents[info_hash]
+            except Exception as e:
+                logger.error(f"Error removing torrent: {str(e)}")
+                self.error.emit(f"Error removing torrent: {str(e)}")
             
     def _monitor_alerts(self):
         """Monitor libtorrent alerts"""
         while True:
-            alerts = self.session.pop_alerts()
-            for alert in alerts:
-                if isinstance(alert, lt.torrent_finished_alert):
-                    info_hash = str(alert.handle.info_hash())
-                    if info_hash in self.torrents:
-                        # Emit completed signal
-                        self.torrents[info_hash].completed.emit(info_hash)
+            try:
+                alerts = self.session.pop_alerts()
+                for alert in alerts:
+                    if isinstance(alert, lt.torrent_finished_alert):
+                        info_hash = str(alert.handle.info_hash())
+                        if info_hash in self.torrents:
+                            # Emit completed signal
+                            self.torrents[info_hash].completed.emit(info_hash)
+                    elif isinstance(alert, lt.torrent_error_alert):
+                        info_hash = str(alert.handle.info_hash())
+                        if info_hash in self.torrents:
+                            self.torrents[info_hash].error.emit(info_hash, str(alert.error))
+            except Exception as e:
+                logger.error(f"Error in alert monitor: {str(e)}")
             time.sleep(0.5)
             
     def _update_status(self):
         """Update status of all torrents"""
         while True:
-            # Update individual torrent status
-            for torrent in self.torrents.values():
-                status = torrent.get_status()
-                torrent.status_updated.emit(status)
-            
-            # Update overall client status
-            download_rate = sum(t.handle.status().download_rate for t in self.torrents.values())
-            upload_rate = sum(t.handle.status().upload_rate for t in self.torrents.values())
-            
-            self.client_status_updated.emit({
-                'num_torrents': len(self.torrents),
-                'download_rate': download_rate / 1024,
-                'upload_rate': upload_rate / 1024
-            })
-            
+            try:
+                # Update individual torrent status
+                for torrent in self.torrents.values():
+                    status = torrent.get_status()
+                    if status:
+                        torrent.status_updated.emit(status)
+                
+                # Update overall client status
+                download_rate = sum(t.handle.status().download_rate for t in self.torrents.values())
+                upload_rate = sum(t.handle.status().upload_rate for t in self.torrents.values())
+                
+                self.client_status_updated.emit({
+                    'num_torrents': len(self.torrents),
+                    'download_rate': download_rate / 1024,
+                    'upload_rate': upload_rate / 1024
+                })
+            except Exception as e:
+                logger.error(f"Error updating status: {str(e)}")
             time.sleep(1)
             
     def set_download_limit(self, limit_kbps):
         """Set global download rate limit in KiB/s"""
-        self.session.set_download_rate_limit(limit_kbps * 1024)
+        try:
+            self.session.set_download_rate_limit(limit_kbps * 1024)
+        except Exception as e:
+            logger.error(f"Error setting download limit: {str(e)}")
+            self.error.emit(f"Error setting download limit: {str(e)}")
         
     def set_upload_limit(self, limit_kbps):
         """Set global upload rate limit in KiB/s"""
-        self.session.set_upload_rate_limit(limit_kbps * 1024) 
+        try:
+            self.session.set_upload_rate_limit(limit_kbps * 1024)
+        except Exception as e:
+            logger.error(f"Error setting upload limit: {str(e)}")
+            self.error.emit(f"Error setting upload limit: {str(e)}") 

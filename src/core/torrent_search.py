@@ -4,6 +4,8 @@ import re
 import time
 from threading import Thread
 from PyQt5.QtCore import QObject, pyqtSignal
+import urllib.parse
+import json
 
 class TorrentSearchResult:
     """Class representing a single torrent search result"""
@@ -32,7 +34,7 @@ class TorrentSearchEngine(QObject):
         self.search_providers = [
             self._search_thepiratebay,
             self._search_1337x,
-            # Add more providers as needed
+            self._search_rarbg
         ]
         self.results = []
         self.is_searching = False
@@ -86,25 +88,34 @@ class TorrentSearchEngine(QObject):
         results = []
         
         try:
-            # Simulate search - in a real app, you would implement actual API calls
-            # This is a simplified example to show the structure
-            url = f"https://thepiratebay.org/search/{query}/0/99/0"
+            # Use TPB API
+            encoded_query = urllib.parse.quote(query)
+            url = f"https://apibay.org/q.php?q={encoded_query}"
             
-            # Note: In a production app, you'd need to handle actual site structure
-            # This is just a placeholder for demonstration purposes
-            results.append(
-                TorrentSearchResult(
-                    name=f"Sample TPB result for: {query}",
-                    seeds=100,
-                    leechers=10,
-                    size="1.5 GB",
-                    magnet_link="magnet:?xt=urn:btih:SAMPLE_HASH&dn=Sample",
-                    source="ThePirateBay"
-                )
-            )
+            response = requests.get(url, headers=self.headers, timeout=10)
+            response.raise_for_status()
             
-            # Sleep to simulate network delay
-            time.sleep(0.5)
+            torrents = response.json()
+            
+            for torrent in torrents:
+                if torrent.get('name') and torrent.get('info_hash'):
+                    # Convert size to human readable format
+                    size_bytes = int(torrent.get('size', 0))
+                    size = self._format_size(size_bytes)
+                    
+                    # Create magnet link
+                    magnet_link = f"magnet:?xt=urn:btih:{torrent['info_hash']}&dn={urllib.parse.quote(torrent['name'])}"
+                    
+                    results.append(
+                        TorrentSearchResult(
+                            name=torrent['name'],
+                            seeds=int(torrent.get('seeders', 0)),
+                            leechers=int(torrent.get('leechers', 0)),
+                            size=size,
+                            magnet_link=magnet_link,
+                            source="ThePirateBay"
+                        )
+                    )
             
         except Exception as e:
             self.search_error.emit(f"Error searching ThePirateBay: {str(e)}")
@@ -116,27 +127,96 @@ class TorrentSearchEngine(QObject):
         results = []
         
         try:
-            # Simulate search - in a real app, you would implement actual API calls
-            # This is a simplified example to show the structure
-            url = f"https://1337x.to/search/{query}/1/"
+            # Use 1337x API
+            encoded_query = urllib.parse.quote(query)
+            url = f"https://apibay.org/1337x.php?q={encoded_query}"
             
-            # Note: In a production app, you'd need to handle actual site structure
-            # This is just a placeholder for demonstration purposes
-            results.append(
-                TorrentSearchResult(
-                    name=f"Sample 1337x result for: {query}",
-                    seeds=200,
-                    leechers=20,
-                    size="2.5 GB",
-                    magnet_link="magnet:?xt=urn:btih:SAMPLE_HASH_1337X&dn=Sample",
-                    source="1337x"
-                )
-            )
+            response = requests.get(url, headers=self.headers, timeout=10)
+            response.raise_for_status()
             
-            # Sleep to simulate network delay
-            time.sleep(0.5)
+            torrents = response.json()
+            
+            for torrent in torrents:
+                if torrent.get('name') and torrent.get('info_hash'):
+                    # Convert size to human readable format
+                    size_bytes = int(torrent.get('size', 0))
+                    size = self._format_size(size_bytes)
+                    
+                    # Create magnet link
+                    magnet_link = f"magnet:?xt=urn:btih:{torrent['info_hash']}&dn={urllib.parse.quote(torrent['name'])}"
+                    
+                    results.append(
+                        TorrentSearchResult(
+                            name=torrent['name'],
+                            seeds=int(torrent.get('seeders', 0)),
+                            leechers=int(torrent.get('leechers', 0)),
+                            size=size,
+                            magnet_link=magnet_link,
+                            source="1337x"
+                        )
+                    )
             
         except Exception as e:
             self.search_error.emit(f"Error searching 1337x: {str(e)}")
             
-        return results 
+        return results
+        
+    def _search_rarbg(self, query):
+        """Search RARBG for torrents"""
+        results = []
+        
+        try:
+            # Use RARBG API
+            encoded_query = urllib.parse.quote(query)
+            url = f"https://rarbg.to/torrents.php?search={encoded_query}&sort=seeders&order=desc"
+            
+            response = requests.get(url, headers=self.headers, timeout=10)
+            response.raise_for_status()
+            
+            soup = BeautifulSoup(response.text, 'html.parser')
+            torrent_rows = soup.find_all('tr', class_='lista2')
+            
+            for row in torrent_rows:
+                try:
+                    # Extract torrent details
+                    name_cell = row.find('td', class_='lista')
+                    if not name_cell:
+                        continue
+                        
+                    name = name_cell.find('a').text.strip()
+                    magnet_link = name_cell.find('a')['href']
+                    
+                    # Extract size
+                    size_cell = row.find_all('td', class_='lista')[3]
+                    size = size_cell.text.strip()
+                    
+                    # Extract seeds and leechers
+                    seeds = int(row.find_all('td', class_='lista')[4].text.strip())
+                    leechers = int(row.find_all('td', class_='lista')[5].text.strip())
+                    
+                    results.append(
+                        TorrentSearchResult(
+                            name=name,
+                            seeds=seeds,
+                            leechers=leechers,
+                            size=size,
+                            magnet_link=magnet_link,
+                            source="RARBG"
+                        )
+                    )
+                    
+                except (AttributeError, ValueError) as e:
+                    continue
+                    
+        except Exception as e:
+            self.search_error.emit(f"Error searching RARBG: {str(e)}")
+            
+        return results
+        
+    def _format_size(self, size_bytes):
+        """Convert size in bytes to human readable format"""
+        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+            if size_bytes < 1024.0:
+                return f"{size_bytes:.2f} {unit}"
+            size_bytes /= 1024.0
+        return f"{size_bytes:.2f} PB" 

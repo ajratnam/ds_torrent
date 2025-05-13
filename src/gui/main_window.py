@@ -139,11 +139,15 @@ class MainWindow(QMainWindow):
         # Torrent client signals
         self.torrent_client.torrent_added.connect(self.on_torrent_added)
         self.torrent_client.client_status_updated.connect(self.on_client_status_updated)
+        self.torrent_client.error.connect(self.on_error)
         
         # Table signals
         self.torrent_table.pause_torrent.connect(self.pause_torrent)
         self.torrent_table.resume_torrent.connect(self.resume_torrent)
         self.torrent_table.remove_torrent.connect(self.handle_remove_torrent)
+        
+        # Search engine signals
+        self.search_engine.search_error.connect(self.on_error)
         
     @pyqtSlot(object)
     def on_torrent_added(self, torrent):
@@ -178,6 +182,10 @@ class MainWindow(QMainWindow):
         else:
             self.status_dht.setText("DHT: Off")
         
+    def on_error(self, error_message):
+        """Handle error messages"""
+        QMessageBox.critical(self, "Error", error_message)
+        
     def add_torrent_dialog(self):
         """Show dialog to add a torrent file"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -190,7 +198,9 @@ class MainWindow(QMainWindow):
             )
             
             if save_path:
-                self.torrent_client.add_torrent(file_path, save_path)
+                torrent = self.torrent_client.add_torrent(file_path, save_path)
+                if not torrent:
+                    QMessageBox.warning(self, "Warning", "Failed to add torrent. Check the error message for details.")
                 
     def add_magnet_dialog(self):
         """Show dialog to add a magnet link"""
@@ -199,12 +209,18 @@ class MainWindow(QMainWindow):
         )
         
         if ok and magnet_link:
+            if not magnet_link.startswith('magnet:'):
+                QMessageBox.warning(self, "Invalid Link", "Please enter a valid magnet link starting with 'magnet:'")
+                return
+                
             save_path = QFileDialog.getExistingDirectory(
                 self, "Select Save Location", self.default_save_path
             )
             
             if save_path:
-                self.torrent_client.add_torrent(magnet_link, save_path)
+                torrent = self.torrent_client.add_torrent(magnet_link, save_path)
+                if not torrent:
+                    QMessageBox.warning(self, "Warning", "Failed to add magnet link. Check the error message for details.")
                 
     def download_from_search(self, magnet_link):
         """Download a torrent from search results"""
@@ -213,7 +229,9 @@ class MainWindow(QMainWindow):
         )
         
         if save_path:
-            self.torrent_client.add_torrent(magnet_link, save_path)
+            torrent = self.torrent_client.add_torrent(magnet_link, save_path)
+            if not torrent:
+                QMessageBox.warning(self, "Warning", "Failed to add torrent from search. Check the error message for details.")
             
     def pause_torrent(self, info_hash):
         """Pause a torrent"""
