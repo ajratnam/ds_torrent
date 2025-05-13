@@ -3,6 +3,8 @@ import sys
 import datetime
 import time
 import json
+import libtorrent as lt # Ensure libtorrent is imported for settings_pack keys
+import logging # Added for logging
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QWidget, QVBoxLayout,
                             QHBoxLayout, QLabel, QPushButton, QLineEdit,
                             QTableWidget, QTableWidgetItem, QHeaderView,
@@ -27,6 +29,22 @@ from src.gui.torrent_detail_widget import TorrentDetailWidget
 APP_NAME = "PythonBitTorrentClient"
 STATE_FILE_NAME = "app_state.json"
 
+log = logging.getLogger(__name__) # Added for logging
+
+# Define KNOWN_GOOD_SETTINGS_KEYS at the module level or ensure it's accessible
+# For this example, I'll define a placeholder. Ensure it matches your actual list.
+KNOWN_GOOD_SETTINGS_KEYS = [
+    'user_agent', 'listen_interfaces', 'download_rate_limit', 'upload_rate_limit',
+    'max_connections_global', 'max_half_open_connections',
+    'encryption_policy_forced', 'encryption_policy_enabled', 'allowed_enc_level_rc4',
+    'allowed_enc_level_plaintext', 'allowed_enc_level_pe',
+    'announce_to_all_tiers', 'announce_to_all_trackers',
+    'auto_scrape_interval', 'stop_tracker_timeout', 'connection_speed',
+    'unchoke_slots_limit', 'max_allowed_in_request_queue',
+    'active_downloads', 'active_seeds', 'active_limit'
+    # Ensure 'auto_manage_slots' and 'enable_pex' are NOT here if problematic
+]
+
 class MainWindow(QMainWindow):
     """Main application window"""
     def __init__(self):
@@ -37,6 +55,11 @@ class MainWindow(QMainWindow):
         # Setup core components
         self.torrent_client = TorrentClient(self.app_data_dir)
         self.search_engine = TorrentSearchEngine()
+        
+        # UI Related flags / App settings
+        self.confirm_on_exit_flag = True # Default
+        self.start_minimized_flag = False # Default
+        self.show_speed_in_title_flag = False # Default
         
         # Setup UI
         self.setup_ui()
@@ -71,6 +94,8 @@ class MainWindow(QMainWindow):
         """Load application state from disk."""
         if not os.path.exists(self.state_file_path):
             print(f"State file not found: {self.state_file_path}. Starting with defaults.")
+            # Apply default client settings if no state file
+            self.torrent_client.apply_session_settings({}) # Apply default libtorrent settings
             return
 
         try:
@@ -78,6 +103,7 @@ class MainWindow(QMainWindow):
                 state_data = json.load(f)
         except (IOError, json.JSONDecodeError) as e:
             print(f"Error loading state file {self.state_file_path}: {e}")
+            self.torrent_client.apply_session_settings({}) # Apply default libtorrent settings on error
             return
 
         # Restore window geometry
@@ -87,13 +113,43 @@ class MainWindow(QMainWindow):
 
         # Restore default save path
         self.default_save_path = state_data.get('default_save_path', self.default_save_path)
+        # The save_path_edit in SettingsDialog will be populated when show_settings() is called.
 
-        # Restore torrent client settings (example for limits)
-        client_settings = state_data.get('client_settings', {})
-        download_limit = client_settings.get('download_rate_limit', 0)
-        upload_limit = client_settings.get('upload_rate_limit', 0)
-        self.torrent_client.set_download_limit(download_limit // 1024) # Assuming settings are in bytes/s
-        self.torrent_client.set_upload_limit(upload_limit // 1024)
+        # Restore interface settings
+        self.confirm_on_exit_flag = state_data.get('ui_confirm_on_exit', self.confirm_on_exit_flag)
+        self.start_minimized_flag = state_data.get('ui_start_minimized', self.start_minimized_flag)
+        self.show_speed_in_title_flag = state_data.get('ui_show_speed_in_title', self.show_speed_in_title_flag)
+
+        # Restore torrent client settings
+        client_settings_json = state_data.get('client_settings', {})
+        if client_settings_json: 
+            # Filter out unknown keys before applying
+            filtered_client_settings = {
+                k: v for k, v in client_settings_json.items() if k in KNOWN_GOOD_SETTINGS_KEYS
+            }
+            if filtered_client_settings:
+                if self.torrent_client:
+                    self.torrent_client.apply_session_settings(filtered_client_settings)
+                    # Cache the loaded & applied settings for the settings dialog
+                    self.client_settings_cache = dict(filtered_client_settings) 
+                else:
+                    print("Torrent client not available during load_app_state to apply settings.")
+            else:
+                print("No client settings to apply after filtering.")
+                self.client_settings_cache = {} # Reset cache if no settings loaded
+        else:
+            print("No 'client_settings' key found in app_state.json.")
+            self.client_settings_cache = {} # Reset cache
+        
+        # Ensure torrent_client is initialized before trying to get its default settings
+        if self.torrent_client and not self.client_settings_cache:
+            # If no settings were loaded, populate cache with current (default) client settings
+            try:
+                self.client_settings_cache = self.torrent_client.get_session_settings()
+                print(f"Initialized client_settings_cache with defaults from torrent_client: {self.client_settings_cache}")
+            except Exception as e:
+                print(f"Error getting default settings from torrent_client: {e}")
+                self.client_settings_cache = {}
 
         # Restore torrents
         saved_torrents = state_data.get('torrents', [])
@@ -133,15 +189,44 @@ class MainWindow(QMainWindow):
         state_data['window_geometry'] = self.saveGeometry().toHex().data().decode('ascii')
 
         # Save default save path
+        # Ensure self.default_save_path is up-to-date if changed in settings dialog
+        if hasattr(self, 'settings_dialog') and self.settings_dialog: # Check if settings_dialog was shown
+            # This assumes get_general_settings() or similar exists or path is directly accessed
+            # For now, we assume self.default_save_path is updated by show_settings if dialog is accepted
+             pass # self.default_save_path should be updated by show_settings
         state_data['default_save_path'] = self.default_save_path
 
-        # Save torrent client settings (example for limits from libtorrent settings)
-        session_settings_pack = self.torrent_client.session.get_settings()
-        state_data['client_settings'] = {
-            'download_rate_limit': session_settings_pack['download_rate_limit'],
-            'upload_rate_limit': session_settings_pack['upload_rate_limit'],
-            # Add other relevant libtorrent settings if managed by your UI
+        # Save interface settings
+        state_data['ui_confirm_on_exit'] = self.confirm_on_exit_flag
+        state_data['ui_start_minimized'] = self.start_minimized_flag
+        state_data['ui_show_speed_in_title'] = self.show_speed_in_title_flag
+
+        # Save torrent client settings from libtorrent session settings
+        # These will be saved with string keys for JSON compatibility
+        current_lt_settings_dict = self.torrent_client.get_session_settings() # Assuming this returns a dictionary
+        
+        # --- Remove temporary debug: Print all available setting keys from libtorrent ---
+        # if isinstance(current_lt_settings_dict, dict):
+        #     print("Available libtorrent setting keys:", sorted(current_lt_settings_dict.keys()))
+        # --- End temporary debug ---
+
+        client_settings_to_save = {
+            # Connection Tab
+            'download_rate_limit': current_lt_settings_dict.get('download_rate_limit', 0),
+            'upload_rate_limit': current_lt_settings_dict.get('upload_rate_limit', 0),
+            'listen_interfaces': current_lt_settings_dict.get('listen_interfaces', '0.0.0.0:6881'),
+            'connections_limit': current_lt_settings_dict.get('connections_limit', 100),
+            'unchoke_slots_limit': current_lt_settings_dict.get('unchoke_slots_limit', 8),
+            # Advanced Tab
+            'enable_dht': current_lt_settings_dict.get('enable_dht', True),
+            # 'peer_exchange': current_lt_settings_dict.get('peer_exchange', True), # Remove PEX
+            'enable_lsd': current_lt_settings_dict.get('enable_lsd', True),
+            # Encryption settings - these are integer values representing enums
+            'out_enc_policy': current_lt_settings_dict.get('out_enc_policy', lt.enc_level.pe_rc4),
+            'in_enc_policy': current_lt_settings_dict.get('in_enc_policy', lt.enc_level.pe_rc4),
+            'allowed_enc_level': current_lt_settings_dict.get('allowed_enc_level', lt.enc_level.rc4),
         }
+        state_data['client_settings'] = client_settings_to_save
 
         # Save active torrents
         active_torrents_state = []
@@ -428,28 +513,47 @@ class MainWindow(QMainWindow):
             
     def show_settings(self):
         """Show settings dialog"""
-        dialog = SettingsDialog(self)
-        # TODO: Populate dialog with current settings before showing
-        current_settings = self.torrent_client.session.get_settings()
-        dialog.download_limit_spin.setValue(current_settings['download_rate_limit'] // 1024 if current_settings['download_rate_limit'] > 0 else 0)
-        dialog.upload_limit_spin.setValue(current_settings['upload_rate_limit'] // 1024 if current_settings['upload_rate_limit'] > 0 else 0)
-        # Make sure save_path_edit exists on dialog or self.default_save_path is used correctly
-        # dialog.save_path_edit.setText(self.default_save_path) 
+        # Create (or get) the instance of SettingsDialog
+        # It might be better to create it once, or ensure it's parented correctly if created each time.
+        # For now, following the existing pattern of creating it here.
+        self.settings_dialog = SettingsDialog(self) # Store as instance variable if needed by save_app_state
 
-        if dialog.exec_() == QDialog.Accepted: # QDialog.Accepted should now work
-            # Apply settings
-            download_limit = dialog.download_limit_spin.value() 
-            upload_limit = dialog.upload_limit_spin.value()   
+        # Populate general settings (save path)
+        self.settings_dialog.save_path_edit.setText(self.default_save_path)
+        
+        # Populate interface settings
+        self.settings_dialog.populate_interface_settings(
+            self.confirm_on_exit_flag,
+            self.start_minimized_flag,
+            self.show_speed_in_title_flag
+        )
+
+        # Populate client settings from TorrentClient (Connection & Advanced tabs)
+        current_client_settings_pack = self.torrent_client.get_session_settings() # Returns settings_pack
+        self.settings_dialog.populate_client_settings(current_client_settings_pack)
+        
+
+        if self.settings_dialog.exec_() == QDialog.Accepted:
+            # Apply and save general settings
+            new_save_path = self.settings_dialog.save_path_edit.text()
+            if os.path.isdir(new_save_path): # Basic validation
+                self.default_save_path = new_save_path
+            else:
+                QMessageBox.warning(self, "Invalid Path", f"The specified download path is not valid: {new_save_path}")
+                # Optionally, do not proceed with other settings if path is critical and invalid
+
+            # Apply and save interface settings
+            interface_settings = self.settings_dialog.get_interface_settings()
+            self.confirm_on_exit_flag = interface_settings['confirm_on_exit']
+            self.start_minimized_flag = interface_settings['start_minimized']
+            self.show_speed_in_title_flag = interface_settings['show_speed_in_title']
             
-            self.torrent_client.set_download_limit(download_limit) 
-            self.torrent_client.set_upload_limit(upload_limit)
-            
-            # Save default save path
-            if hasattr(dialog, 'save_path_edit'): # Check if dialog has this attribute
-                 self.default_save_path = dialog.save_path_edit.text()
+            # Apply new client settings to TorrentClient
+            new_client_settings_dict = self.settings_dialog.get_client_settings() # Returns dict with lt.settings_pack keys
+            self.torrent_client.apply_session_settings(new_client_settings_dict)
             
             self.save_app_state() 
-            
+
     def closeEvent(self, event):
         """Handle window close event"""
         # Optionally, skip confirmation if a setting indicates so
@@ -458,7 +562,7 @@ class MainWindow(QMainWindow):
             "Are you sure you want to exit? Active downloads will be stopped, and state will be saved.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
-        )
+        ) if self.confirm_on_exit_flag else QMessageBox.Yes # Skip if flag is false
         
         if reply == QMessageBox.Yes:
             print("Saving application state before closing...")

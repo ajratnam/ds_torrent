@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QTabWidget, QWidget, QGroupBox, QFormLayout,
                             QCheckBox, QComboBox)
 from PyQt5.QtCore import Qt
+import libtorrent as lt
 
 class SettingsDialog(QDialog):
     """Dialog for application settings"""
@@ -55,6 +56,9 @@ class SettingsDialog(QDialog):
         
         layout.addLayout(button_layout)
         
+        # Add stretch to push everything to the top
+        layout.addStretch()
+        
     def setup_general_tab(self):
         """Setup general settings tab"""
         layout = QVBoxLayout(self.general_tab)
@@ -91,6 +95,94 @@ class SettingsDialog(QDialog):
         # Add stretch to push everything to the top
         layout.addStretch()
         
+    def populate_interface_settings(self, confirm_on_exit, start_minimized, show_speed_in_title):
+        """Populate the interface settings checkboxes."""
+        self.confirm_on_exit_check.setChecked(confirm_on_exit)
+        self.start_minimized_check.setChecked(start_minimized)
+        self.show_speed_in_title_check.setChecked(show_speed_in_title)
+
+    def get_interface_settings(self):
+        """Return a dictionary of the interface settings."""
+        return {
+            'confirm_on_exit': self.confirm_on_exit_check.isChecked(),
+            'start_minimized': self.start_minimized_check.isChecked(),
+            'show_speed_in_title': self.show_speed_in_title_check.isChecked()
+        }
+
+    def populate_client_settings(self, client_settings_dict):
+        """Populate connection and advanced settings from a settings dictionary."""
+        # Connection Tab
+        self.download_limit_spin.setValue(client_settings_dict.get('download_rate_limit', 0) // 1024)
+        self.upload_limit_spin.setValue(client_settings_dict.get('upload_rate_limit', 0) // 1024)
+        
+        listen_interfaces_str = client_settings_dict.get('listen_interfaces', '0.0.0.0:6881')
+        try:
+            port = int(listen_interfaces_str.split(':')[1])
+            self.port_spin.setValue(port)
+        except (IndexError, ValueError) as e:
+            print(f"Could not parse port from listen_interfaces: '{listen_interfaces_str}'. Error: {e}")
+            self.port_spin.setValue(6881)
+        self.max_conn_spin.setValue(client_settings_dict.get('connections_limit', 100))
+        default_unchoke_slots = 8
+        self.max_conn_per_torrent_spin.setValue(client_settings_dict.get('unchoke_slots_limit', default_unchoke_slots))
+
+        # Advanced Tab
+        self.dht_check.setChecked(client_settings_dict.get('enable_dht', True))
+        self.lsd_check.setChecked(client_settings_dict.get('enable_lsd', True))
+
+        # Encryption settings
+        # Values in client_settings_dict for these are expected to be integers from libtorrent constants
+        # For policies (out_enc_policy, in_enc_policy), use pe_* variants from lt.enc_level
+        # For allowed level (allowed_enc_level), use direct variants from lt.enc_level
+        out_policy = client_settings_dict.get('out_enc_policy', lt.enc_level.pe_rc4) 
+        in_policy = client_settings_dict.get('in_enc_policy', lt.enc_level.pe_rc4)
+        allowed_level = client_settings_dict.get('allowed_enc_level', lt.enc_level.rc4)
+
+        if (out_policy == lt.enc_level.pe_plaintext and
+            in_policy == lt.enc_level.pe_plaintext and
+            allowed_level == lt.enc_level.plaintext):
+            self.encryption_combo.setCurrentIndex(2) # Disable
+        elif (out_policy == lt.enc_level.pe_rc4 and
+              in_policy == lt.enc_level.pe_rc4 and
+              allowed_level == lt.enc_level.rc4):
+            self.encryption_combo.setCurrentIndex(1) # Require
+        else: # Covers 'both' policies (pe_both) and 'both' allowed_level, or defaults to Prefer
+              # lt.enc_level.pe_both for policies, lt.enc_level.both for level maps to "Prefer" UI
+            self.encryption_combo.setCurrentIndex(0) # Prefer
+
+    def get_client_settings(self):
+        """Return a dictionary of client settings with string keys for libtorrent session."""
+        settings = {}
+        # Connection Tab
+        settings['download_rate_limit'] = self.download_limit_spin.value() * 1024
+        settings['upload_rate_limit'] = self.upload_limit_spin.value() * 1024
+        settings['listen_interfaces'] = f"0.0.0.0:{self.port_spin.value()}"
+        settings['connections_limit'] = self.max_conn_spin.value()
+        settings['unchoke_slots_limit'] = self.max_conn_per_torrent_spin.value()
+
+        # Advanced Tab
+        settings['enable_dht'] = self.dht_check.isChecked()
+        settings['enable_lsd'] = self.lsd_check.isChecked()
+
+        # Encryption
+        # UI "Prefer Encryption" (idx 0)  => out_enc_policy=pe_both, in_enc_policy=pe_both, allowed_enc_level=both
+        # UI "Require Encryption" (idx 1) => out_enc_policy=pe_rc4, in_enc_policy=pe_rc4, allowed_enc_level=rc4
+        # UI "Disable Encryption" (idx 2) => out_enc_policy=pe_plaintext, in_enc_policy=pe_plaintext, allowed_enc_level=plaintext
+        enc_index = self.encryption_combo.currentIndex()
+        if enc_index == 0: # Prefer encryption
+            settings['out_enc_policy'] = lt.enc_level.pe_both
+            settings['in_enc_policy'] = lt.enc_level.pe_both
+            settings['allowed_enc_level'] = lt.enc_level.both
+        elif enc_index == 1: # Require encryption
+            settings['out_enc_policy'] = lt.enc_level.pe_rc4
+            settings['in_enc_policy'] = lt.enc_level.pe_rc4
+            settings['allowed_enc_level'] = lt.enc_level.rc4
+        elif enc_index == 2: # Disable encryption
+            settings['out_enc_policy'] = lt.enc_level.pe_plaintext
+            settings['in_enc_policy'] = lt.enc_level.pe_plaintext
+            settings['allowed_enc_level'] = lt.enc_level.plaintext
+        return settings
+
     def setup_connection_tab(self):
         """Setup connection settings tab"""
         layout = QVBoxLayout(self.connection_tab)
@@ -150,9 +242,6 @@ class SettingsDialog(QDialog):
         self.dht_check = QCheckBox()
         self.dht_check.setChecked(True)
         
-        self.pex_check = QCheckBox()
-        self.pex_check.setChecked(True)
-        
         self.lsd_check = QCheckBox()
         self.lsd_check.setChecked(True)
         
@@ -160,7 +249,6 @@ class SettingsDialog(QDialog):
         self.encryption_combo.addItems(["Prefer encryption", "Require encryption", "Disable encryption"])
         
         bt_layout.addRow("Enable DHT:", self.dht_check)
-        bt_layout.addRow("Enable Peer Exchange:", self.pex_check)
         bt_layout.addRow("Enable Local Peer Discovery:", self.lsd_check)
         bt_layout.addRow("Encryption mode:", self.encryption_combo)
         

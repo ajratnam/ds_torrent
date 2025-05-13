@@ -91,7 +91,7 @@ class TorrentHandle(QObject):
                     conn_type_str = self._format_connection_type(peer_info.connection_type)
 
                     # Log raw peer progress
-                    logger.debug(f"Peer {peer_info.ip[0]}:{peer_info.ip[1]} raw progress: {peer_info.progress}, client: {client_name}")
+                    # logger.debug(f"Peer {peer_info.ip[0]}:{peer_info.ip[1]} raw progress: {peer_info.progress}, client: {client_name}")
 
                     peer_list.append({
                         'ip': peer_info.ip[0],
@@ -341,109 +341,159 @@ class TorrentClient(QObject):
         self.update_thread.daemon = True
         self.update_thread.start()
         
+    def get_session_settings(self):
+        """Return the current libtorrent session settings pack."""
+        return self.session.get_settings() # This returns a settings_pack dictionary (actually an object)
+
+    def apply_session_settings(self, settings_dict_str_keys):
+        """Apply a dictionary of settings (with string keys) to the libtorrent session."""
+        try:
+            # libtorrent session.apply_settings() can typically handle a dictionary 
+            # with string keys mapping to their respective values.
+            self.session.apply_settings(settings_dict_str_keys)
+            # logger.info(f"Applied session settings: {settings_dict_str_keys}")
+            
+            # Important: Check if listen_interfaces was changed and needs special handling.
+            # If 'listen_interfaces' is in settings_dict_str_keys and the port or IP changed,
+            # it might be necessary to call self.session.listen_on() again.
+            # For now, we assume apply_settings handles this, or it's managed by a restart if needed.
+            # Example: if 'listen_interfaces' in settings_dict_str_keys:
+            #    new_listen_interfaces = settings_dict_str_keys['listen_interfaces']
+            #    # Potentially parse and call self.session.listen_on(port, ip, flags)
+            #    # This is complex due to parsing IP and port, and existing listen sockets.
+            #    # For simplicity, we rely on apply_settings or a client restart for listen port changes.
+
+        except Exception as e:
+            logger.error(f"Error applying session settings: {e}")
+            self.error.emit(f"Error applying session settings: {e}")
+        
     def _get_resume_filepath(self, info_hash_str):
         return os.path.join(self.resume_data_dir, f"{info_hash_str}.fastresume")
 
     def add_torrent(self, source, save_path, resume_data_bytes=None, is_completed_on_load=False):
         """
-        Add a new torrent
+        Add a new torrent. For completed magnet links, we add normally and rely on recheck.
         
         Args:
             source: Either a magnet link or path to a .torrent file
             save_path: Directory to save downloaded files
-            resume_data_bytes: Optional bytes for resuming a torrent
+            resume_data_bytes: Optional bytes for resuming a torrent. For magnets, this is now primarily
+                               used to decide if a recheck is needed, not for direct seed_mode.
             is_completed_on_load: Boolean indicating if the torrent should be marked as completed on load
         
         Returns:
-            TorrentHandle object
+            TorrentHandle object or None on failure
         """
+        handle = None 
+        params = None 
+
         try:
-            params = lt.add_torrent_params()
-            
-            # Handle magnet links
             if source.startswith('magnet:'):
                 try:
+                    logger.info(f"Processing magnet link for add_torrent: {source[:70]}...")
                     params = lt.parse_magnet_uri(source)
-                    # Set flags for magnet links
-                    params.flags |= lt.torrent_flags.auto_managed
+                    params.save_path = save_path
+                    
+                    # Standard flags: auto managed, not paused.
+                    # We will NOT set upload_mode or seed_mode here for magnets, even if completed_on_load.
+                    # We also WON'T set resume_data here for magnets due to the ArgumentError.
+                    params.flags |= lt.torrent_flags.auto_managed 
                     params.flags &= ~lt.torrent_flags.paused
-                    if is_completed_on_load and resume_data_bytes:
-                        params.flags |= lt.torrent_flags.seed_mode
-                        logger.info(f"Adding completed magnet {source[:50]}... in seed_mode.")
-                    if resume_data_bytes:
-                        params.resume_data = resume_data_bytes
+
+                    if is_completed_on_load:
+                        logger.info(f"Magnet is_completed_on_load ({source[:70]}...). Will add normally and rely on metadata + recheck.")
+                        # Resume data is not applied here directly for magnets to avoid ArgumentError.
+                    elif resume_data_bytes:
+                        # For non-completed magnets, if we had a way to apply resume_data without error, we would.
+                        # But since it errors, we omit it. The torrent will start fresh or from existing files found by recheck.
+                        logger.info(f"Magnet is NOT completed_on_load, but has resume_data. Will add normally. {source[:70]}")
+
+                    logger.debug(
+                        f"Attempting self.session.add_torrent for magnet (NO resume_data, NO upload/seed_mode). "
+                        f"Name: '{params.name if hasattr(params, 'name') else 'N/A'}', "
+                        f"InfoHashes: '{params.info_hashes if hasattr(params, 'info_hashes') else 'N/A'}', "
+                        f"SavePath: '{params.save_path}', Flags: {params.flags}"
+                    )
+                    handle = self.session.add_torrent(params)
+                    logger.info(f"self.session.add_torrent call completed for magnet {source[:70]}. Handle valid: {handle.is_valid()}")
+
                 except Exception as e:
-                    logger.error(f"Error parsing magnet link: {str(e)}")
-                    self.error.emit(f"Error parsing magnet link: {str(e)}")
+                    logger.error(f"Error in magnet processing block for [{source[:70]}...]: {type(e).__name__} - {str(e)}")
+                    self.error.emit(f"Error processing magnet link: {str(e)}")
                     return None
-            # Handle torrent files
+            # Handle torrent files (can still use resume_data and seed_mode directly if ti is present)
             else:
+                params = lt.add_torrent_params() 
                 try:
-                    # Load the .torrent file
+                    logger.info(f"Processing .torrent file for add_torrent: {source}")
                     info = lt.torrent_info(source)
-                    params.ti = info
-                    # Set flags for torrent files
+                    params.ti = info # Crucial: torrent_info is present
+                    params.save_path = save_path
                     params.flags |= lt.torrent_flags.auto_managed
-                    params.flags &= ~lt.torrent_flags.paused
-                    if is_completed_on_load and resume_data_bytes: # Also for .torrent files if marked completed
-                        params.flags |= lt.torrent_flags.seed_mode
-                        logger.info(f"Adding completed torrent file {source} in seed_mode.")
-                    if resume_data_bytes:
+                    params.flags &= ~lt.torrent_flags.paused 
+
+                    if is_completed_on_load and resume_data_bytes:
+                        logger.info(f"File is completed_on_load. Assigning resume_data ({len(resume_data_bytes)} bytes) BEFORE setting SEED_MODE.")
+                        params.resume_data = resume_data_bytes # Assign resume_data FIRST
+                        params.flags |= lt.torrent_flags.seed_mode # THEN set seed_mode (preferred for files)
+                        logger.info(f"SEED_MODE flag set for completed file {source}.")
+                    elif resume_data_bytes: 
                         params.resume_data = resume_data_bytes
+                    
+                    logger.debug(
+                        f"Attempting self.session.add_torrent for file. "
+                        f"Name: '{params.name if hasattr(params, 'name') else 'N/A'}', "
+                        f"SavePath: '{params.save_path}', Flags: {params.flags}, "
+                        f"ResumeData: {len(params.resume_data) if hasattr(params, 'resume_data') and params.resume_data else 'None'}"
+                    )
+                    handle = self.session.add_torrent(params)
+                    logger.info(f"self.session.add_torrent call completed for file {source}. Handle valid: {handle.is_valid()}")
+
                 except Exception as e:
-                    logger.error(f"Error loading torrent file: {str(e)}")
+                    logger.error(f"Error loading torrent file {source}: {str(e)}")
                     self.error.emit(f"Error loading torrent file: {str(e)}")
                     return None
             
-            # Set save path
-            params.save_path = save_path
-            
-            # Add the torrent to the session
-            handle = self.session.add_torrent(params)
-            
-            # Create a handle object
-            torrent = TorrentHandle(handle, save_path, source) # Pass source here
-            
-            # If loaded as completed, ensure the internal flag is also set
-            if is_completed_on_load:
-                torrent.is_completed_flag = True
+            if not handle or not handle.is_valid():
+                logger.error(f"Failed to obtain a valid torrent handle for {source[:70]}...")
+                self.error.emit(f"Failed to add torrent: {source[:70]}...")
+                return None
 
-            # Store the handle
+            torrent_handle_wrapper = TorrentHandle(handle, save_path, source)
+            
+            if is_completed_on_load:
+                torrent_handle_wrapper.is_completed_flag = True
+                logger.info(f"Torrent {source[:70]} marked with is_completed_flag = True in wrapper.")
+
             info_hash = str(handle.info_hash())
-            self.torrents[info_hash] = torrent
+            self.torrents[info_hash] = torrent_handle_wrapper
             
-            # Start the torrent
-            handle.set_sequential_download(False)
-            handle.set_priority(1)
-            
-            # If resume data was provided, or if it's a file-based torrent (not magnet initially)
-            # it's often good to ensure files are checked.
-            if resume_data_bytes or not source.startswith('magnet:'):
-                if handle.is_valid(): # Check if handle is still valid
-                    print(f"Forcing recheck for torrent: {name if 'name' in locals() else info_hash}")
+            # Force recheck for completed magnets (after metadata) or any torrent with resume data/completed file
+            # The actual recheck for magnets will effectively happen once metadata is received and this is called again
+            # or if torrent_added signal triggers a recheck in MainWindow based on is_completed_flag.
+            if handle.is_valid(): 
+                if source.startswith('magnet:'):
+                    if is_completed_on_load: # For completed magnets, we want a recheck after metadata
+                        logger.info(f"Magnet {info_hash} is_completed_on_load. Will rely on metadata_received and subsequent recheck.")
+                        # No immediate force_recheck here as metadata isn't available yet.
+                        # The recheck should be triggered by metadata_received_alert logic or UI.
+                    elif resume_data_bytes:
+                         # If it's a magnet that wasn't marked completed but had resume data (which we couldn't apply)
+                         # a recheck after metadata might still be useful.
+                        logger.info(f"Magnet {info_hash} had resume_data (not applied). Recheck will occur after metadata.")
+
+                elif resume_data_bytes or (not source.startswith('magnet:') and is_completed_on_load):
+                    # This covers .torrent files with resume data, or completed .torrent files.
+                    logger.info(f"File-based torrent {info_hash} with resume_data/completed_flag. Triggering immediate recheck.")
                     handle.force_recheck()
             
-            # For torrent files, verify files exist
-            if not source.startswith('magnet:'):
-                try:
-                    # Check if save path exists
-                    if not os.path.exists(save_path):
-                        os.makedirs(save_path)
-                except Exception as e:
-                    logger.error(f"Error creating save directory: {str(e)}")
-                    self.error.emit(f"Error creating save directory: {str(e)}")
+            torrent_handle_wrapper.error.connect(lambda ih, msg: self.error.emit(f"Torrent {ih}: {msg}"))
+            self.torrent_added.emit(torrent_handle_wrapper)
+            return torrent_handle_wrapper
             
-            # Connect error signal
-            torrent.error.connect(lambda info_hash, msg: self.error.emit(f"Torrent {info_hash}: {msg}"))
-            
-            # Emit the signal
-            self.torrent_added.emit(torrent)
-            
-            return torrent
-            
-        except Exception as e:
-            logger.error(f"Error adding torrent: {str(e)}")
-            self.error.emit(f"Error adding torrent: {str(e)}")
+        except Exception as e: 
+            logger.error(f"Outer scope error adding torrent {source[:70]}...: {type(e).__name__} - {str(e)}")
+            self.error.emit(f"Outer scope error adding torrent: {str(e)}")
             return None
     
     def remove_torrent(self, info_hash, delete_files=False):
@@ -551,16 +601,22 @@ class TorrentClient(QObject):
                             try:
                                 resume_data_content = alert.resume_data
                                 if isinstance(resume_data_content, dict):
-                                    # This is unexpected. Log and skip.
-                                    logger.error(f"Save resume data for {info_hash_str} is a dict, not bytes. Content: {resume_data_content}")
+                                    # Bencode the dictionary to bytes before writing
+                                    logger.info(f"Resume data for {info_hash_str} is a dict, bencoding it.")
+                                    bencoded_data = lt.bencode(resume_data_content)
+                                    with open(filepath, 'wb') as f:
+                                        f.write(bencoded_data)
+                                    logger.info(f"Saved bencoded resume data for {info_hash_str} to {filepath}")
                                 elif isinstance(resume_data_content, bytes):
                                     with open(filepath, 'wb') as f:
                                         f.write(resume_data_content)
-                                    logger.info(f"Saved resume data for {info_hash_str} to {filepath}")
+                                    logger.info(f"Saved resume data (bytes) for {info_hash_str} to {filepath}")
                                 else:
                                     logger.error(f"Save resume data for {info_hash_str} is of unexpected type: {type(resume_data_content)}")
                             except IOError as e:
                                 logger.error(f"Failed to write resume data for {info_hash_str} to {filepath}: {e}")
+                            except Exception as e: # Catch potential bencode errors or other issues
+                                logger.error(f"Error processing or writing resume data for {info_hash_str}: {e}")
                         elif info_hash_str:
                              logger.warning(f"Save resume data alert for {info_hash_str} but no resume_data content or handle invalid.")
 
