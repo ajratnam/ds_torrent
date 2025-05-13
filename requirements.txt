@@ -1,0 +1,5 @@
+libtorrent>=2.0.7
+PyQt5==5.15.9
+requests==2.31.0
+beautifulsoup4==4.12.2
+pyqtchart==5.15.6 
