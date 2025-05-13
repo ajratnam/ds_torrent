@@ -10,6 +10,8 @@ class TorrentProgressBar(QProgressBar):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setTextVisible(True)
+        # Ensure progress bar text is visible against the dark background
+        self.setStyleSheet("QProgressBar { color: #1E1E1E; } QProgressBar::chunk { background-color: #40E0D0; margin: 0.5px; border-radius: 2px; }")
 
 
 class TorrentTableWidget(QTableWidget):
@@ -163,17 +165,22 @@ class TorrentTableWidget(QTableWidget):
         # Re-setting it here on every status update might be redundant unless it can change.
 
         # Color coding based on status
-        if status['state'] == 'downloading':
-            self.item(row, 3).setForeground(QColor(0, 128, 0))  # Green
-        elif status['state'] == 'seeding':
-            self.item(row, 3).setForeground(QColor(0, 0, 255))  # Blue
-        elif status['state'] == 'paused':
-            self.item(row, 3).setForeground(QColor(128, 128, 128))  # Gray
-        elif 'error' in status['state'].lower():
-            self.item(row, 3).setForeground(QColor(255, 0, 0))  # Red
-        elif not status['has_metadata']:
-            self.item(row, 3).setForeground(QColor(255, 165, 0))  # Orange for fetching metadata
-            
+        state_text = status['state'].lower()
+        status_item = self.item(row, 3)
+
+        if 'downloading' in state_text:
+            status_item.setForeground(QColor("#40E0D0"))  # Vibrant Teal
+        elif 'seeding' in state_text:
+            status_item.setForeground(QColor("#76FF03"))  # Bright Green
+        elif 'paused' in state_text:
+            status_item.setForeground(QColor("#9E9E9E"))  # Medium Gray
+        elif 'error' in state_text:
+            status_item.setForeground(QColor("#FF5252"))  # Bright Red
+        elif not status['has_metadata'] or 'fetching metadata' in state_text or 'checking' in state_text:
+            status_item.setForeground(QColor("#FFC107"))  # Amber/Yellow
+        else: # Default color from stylesheet
+            status_item.setForeground(QColor("#E0E0E0"))
+
     def remove_torrent_row(self, info_hash):
         """Remove a torrent from the table"""
         for row, hash_val in list(self.torrent_hashes.items()):
@@ -192,9 +199,9 @@ class TorrentTableWidget(QTableWidget):
         current_row = self.currentRow()
         current_status = "unknown"
         if current_row >= 0 and self.item(current_row, 3):
-            current_status = self.item(current_row, 3).text()
+            current_status = self.item(current_row, 3).text().lower()
 
-        if seconds == 0 and current_status not in ["seeding", "finished", "paused"]:
+        if seconds == 0 and current_status not in ["seeding", "finished", "paused", "completed"]:
              return "Stalled"
 
         days = int(seconds // 86400)

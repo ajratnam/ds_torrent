@@ -172,22 +172,17 @@ class TorrentDetailWidget(QWidget):
         menu.exec_(self.files_table.viewport().mapToGlobal(position))
 
     def _format_file_priority(self, priority_val):
-        # libtorrent priorities:
-        # 0: Don't download
-        # 1: Normal priority
-        # 4: Normal (some clients use 4 as default)
-        # 6: High priority
-        # 7: Maximal priority
+        default_color = QColor("#E0E0E0") # Default text color from theme
         if priority_val == 0:
-            return "Don't Download"
+            return "Don't Download", QColor("#9E9E9E") # Medium Gray
         elif priority_val == 1 or priority_val == 4: # Treat 1 and 4 as Normal
-            return "Normal"
+            return "Normal", default_color
         elif priority_val == 6:
-            return "High"
+            return "High", QColor("#FFB74D") # Light Orange
         elif priority_val == 7:
-            return "Maximal"
+            return "Maximal", QColor("#40E0D0") # Vibrant Teal
         else:
-            return f"Unknown ({priority_val})"
+            return f"Unknown ({priority_val})", default_color
 
     def update_details(self, status_dict):
         if not status_dict:
@@ -204,10 +199,10 @@ class TorrentDetailWidget(QWidget):
         self.lbl_status.setText(status_dict.get('state', 'N/A').capitalize())
         self.lbl_total_size.setText(_format_bytes(status_dict.get('total_size', 0)))
         
-        num_pieces = status_dict.get('num_pieces', 0)
-        piece_length = status_dict.get('piece_length', 0)
-        self.lbl_num_pieces.setText(f"{num_pieces}")
-        self.lbl_piece_length.setText(_format_bytes(piece_length))
+        num_pieces_val = status_dict.get('num_pieces', 0)
+        piece_length_val = status_dict.get('piece_length', 0)
+        self.lbl_num_pieces.setText(f"{num_pieces_val} ({_format_bytes(piece_length_val)} each)")
+        # self.lbl_piece_length.setText(_format_bytes(piece_length_val)) # Combined with num_pieces
 
         availability = status_dict.get('distributed_copies', -1.0)
         if availability == -1.0: # libtorrent often returns -1 for full copies when unknown
@@ -226,6 +221,8 @@ class TorrentDetailWidget(QWidget):
             try:
                 dt_object = datetime.datetime.fromtimestamp(added_ts)
                 self.lbl_added_on.setText(dt_object.strftime("%Y-%m-%d %H:%M:%S"))
+            except ValueError: # Handle potential timestamp conversion errors for very old/future dates
+                self.lbl_added_on.setText("Invalid Date")
             except:
                 self.lbl_added_on.setText("N/A")
         else:
@@ -239,18 +236,30 @@ class TorrentDetailWidget(QWidget):
                 self.files_table.setRowCount(len(files_data))
                 for i, file_info in enumerate(files_data):
                     self.files_table.setItem(i, 0, QTableWidgetItem(file_info.get('path', 'N/A')))
-                    self.files_table.setItem(i, 1, QTableWidgetItem(_format_bytes(file_info.get('size', 0))))
+                    
+                    size_item = QTableWidgetItem(_format_bytes(file_info.get('size', 0)))
+                    size_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    self.files_table.setItem(i, 1, size_item)
                     
                     progress_val = file_info.get('progress', 0)
                     progress_bar = QProgressBar()
                     progress_bar.setValue(int(progress_val))
                     progress_bar.setTextVisible(True)
                     progress_bar.setFormat(f"{progress_val:.1f}%")
+                    # Progress bar styling is handled globally, specific text color if needed:
+                    # progress_bar.setStyleSheet("QProgressBar { color: #1E1E1E; } QProgressBar::chunk { background-color: #40E0D0; margin: 1px; }")
                     self.files_table.setCellWidget(i, 2, progress_bar)
                     
-                    self.files_table.setItem(i, 3, QTableWidgetItem(_format_bytes(file_info.get('downloaded', 0))))
-                    priority_str = self._format_file_priority(file_info.get('priority', 0))
-                    self.files_table.setItem(i, 4, QTableWidgetItem(priority_str))
+                    downloaded_item = QTableWidgetItem(_format_bytes(file_info.get('downloaded', 0)))
+                    downloaded_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    self.files_table.setItem(i, 3, downloaded_item)
+                    
+                    priority_val = file_info.get('priority', 0)
+                    priority_text, priority_color = self._format_file_priority(priority_val)
+                    priority_item = QTableWidgetItem(priority_text)
+                    priority_item.setForeground(priority_color)
+                    priority_item.setTextAlignment(Qt.AlignCenter)
+                    self.files_table.setItem(i, 4, priority_item)
             else:
                 # Show a message if no files or metadata not yet available
                 self.files_table.setRowCount(1)
@@ -267,19 +276,37 @@ class TorrentDetailWidget(QWidget):
                 self.peers_table.setRowCount(len(peers_data))
                 for i, peer_info in enumerate(peers_data):
                     self.peers_table.setItem(i, 0, QTableWidgetItem(peer_info.get('ip', 'N/A')))
-                    self.peers_table.setItem(i, 1, QTableWidgetItem(str(peer_info.get('port', 'N/A'))))
+                    
+                    port_item = QTableWidgetItem(str(peer_info.get('port', 'N/A')))
+                    port_item.setTextAlignment(Qt.AlignCenter)
+                    self.peers_table.setItem(i, 1, port_item)
+                    
                     self.peers_table.setItem(i, 2, QTableWidgetItem(peer_info.get('client', 'N/A')))
                     
                     progress_val = peer_info.get('progress', 0)
-                    # Using a simple text item for peer progress, can be changed to a bar if desired
                     item_progress = QTableWidgetItem(f"{progress_val:.1f}%")
+                    item_progress.setTextAlignment(Qt.AlignCenter)
                     self.peers_table.setItem(i, 3, item_progress)
 
-                    self.peers_table.setItem(i, 4, QTableWidgetItem(f"{peer_info.get('down_speed', 0):.1f} KB/s"))
-                    self.peers_table.setItem(i, 5, QTableWidgetItem(f"{peer_info.get('up_speed', 0):.1f} KB/s"))
-                    self.peers_table.setItem(i, 6, QTableWidgetItem(peer_info.get('flags', '-')))
-                    self.peers_table.setItem(i, 7, QTableWidgetItem(peer_info.get('connection_type', 'N/A')))
-                    self.peers_table.setItem(i, 8, QTableWidgetItem(peer_info.get('source', 'N/A')))
+                    down_speed_item = QTableWidgetItem(f"{peer_info.get('down_speed', 0):.1f} KB/s")
+                    down_speed_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    self.peers_table.setItem(i, 4, down_speed_item)
+                    
+                    up_speed_item = QTableWidgetItem(f"{peer_info.get('up_speed', 0):.1f} KB/s")
+                    up_speed_item.setTextAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                    self.peers_table.setItem(i, 5, up_speed_item)
+                    
+                    flags_item = QTableWidgetItem(peer_info.get('flags', '-'))
+                    flags_item.setTextAlignment(Qt.AlignCenter)
+                    self.peers_table.setItem(i, 6, flags_item)
+                    
+                    conn_type_item = QTableWidgetItem(peer_info.get('connection_type', 'N/A'))
+                    conn_type_item.setTextAlignment(Qt.AlignCenter)
+                    self.peers_table.setItem(i, 7, conn_type_item)
+                    
+                    source_item = QTableWidgetItem(peer_info.get('source', 'N/A'))
+                    source_item.setTextAlignment(Qt.AlignCenter)
+                    self.peers_table.setItem(i, 8, source_item)
             else:
                 self.peers_table.setRowCount(1)
                 no_peers_item = QTableWidgetItem("No peer information available.")
@@ -295,7 +322,7 @@ class TorrentDetailWidget(QWidget):
         self.lbl_status.setText("N/A")
         self.lbl_total_size.setText("N/A")
         self.lbl_num_pieces.setText("N/A")
-        self.lbl_piece_length.setText("N/A")
+        # self.lbl_piece_length.setText("N/A") # Removed as it's combined
         self.lbl_availability.setText("N/A")
         self.lbl_added_on.setText("N/A")
         self.lbl_comment.setText("N/A")

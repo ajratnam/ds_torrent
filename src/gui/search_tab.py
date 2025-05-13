@@ -34,11 +34,11 @@ class SearchResultsTable(QTableWidget):
         header.setSectionResizeMode(0, QHeaderView.Stretch)  # Name
         
         # Set column widths
-        self.setColumnWidth(1, 80)   # Size
-        self.setColumnWidth(2, 60)   # Seeds
-        self.setColumnWidth(3, 60)   # Leechers
-        self.setColumnWidth(4, 80)   # Source
-        self.setColumnWidth(5, 80)   # Magnet Link
+        self.setColumnWidth(1, 90)   # Size (increased width slightly)
+        self.setColumnWidth(2, 70)   # Seeds (increased width slightly)
+        self.setColumnWidth(3, 70)   # Leechers (increased width slightly)
+        self.setColumnWidth(4, 100)  # Source (increased width slightly)
+        self.setColumnWidth(5, 120)  # Magnet Link (increased width slightly)
         
         # Double click to download
         self.cellDoubleClicked.connect(lambda row, col: self.download_requested.emit(row))
@@ -175,19 +175,26 @@ class SearchTab(QWidget):
             
             # Seeds
             seeds_item = QTableWidgetItem(str(result.seeds))
-            seeds_item.setForeground(QColor(0, 128, 0))  # Green
+            seeds_item.setForeground(QColor("#76FF03"))  # Bright Green (Consistent with TorrentTable)
+            seeds_item.setTextAlignment(Qt.AlignCenter) # Center align
             self.results_table.setItem(i, 2, seeds_item)
             
             # Leechers
             leechers_item = QTableWidgetItem(str(result.leechers))
+            leechers_item.setForeground(QColor("#64B5F6")) # Light Blue
+            leechers_item.setTextAlignment(Qt.AlignCenter) # Center align
             self.results_table.setItem(i, 3, leechers_item)
             
             # Source
-            self.results_table.setItem(i, 4, QTableWidgetItem(result.source))
+            source_item = QTableWidgetItem(result.source)
+            source_item.setTextAlignment(Qt.AlignCenter) # Center align
+            self.results_table.setItem(i, 4, source_item)
             
             # Magnet link (shortened)
             magnet_short = result.magnet_link[:20] + "..."
-            self.results_table.setItem(i, 5, QTableWidgetItem(magnet_short))
+            magnet_item = QTableWidgetItem(magnet_short)
+            magnet_item.setToolTip(result.magnet_link) # Show full link on hover
+            self.results_table.setItem(i, 5, magnet_item)
             
         # Hide progress bar
         self.progress_bar.setVisible(False)
@@ -203,12 +210,15 @@ class SearchTab(QWidget):
         
         # Update status
         self.status_label.setText(f"Error: {error_msg}")
+        self.status_label.setStyleSheet("color: #FF5252;") # Error color for status label
         
     @pyqtSlot(int, int)
     def on_search_progress(self, current, total):
         """Handle search progress updates"""
         progress = int((current / total) * 100)
         self.progress_bar.setValue(progress)
+        self.status_label.setText(f"Searching... {progress}%") # Update status label during progress
+        self.status_label.setStyleSheet("color: #E0E0E0;") # Reset to default color
         
     def on_download_requested(self, row):
         """Handle download request for a torrent"""

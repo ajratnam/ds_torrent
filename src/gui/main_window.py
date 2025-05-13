@@ -51,6 +51,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         
         self._init_paths()
+        self._set_application_style() # Apply custom styles
 
         # Setup core components
         self.torrent_client = TorrentClient(self.app_data_dir)
@@ -89,6 +90,295 @@ class MainWindow(QMainWindow):
                 self.app_data_dir = "." 
 
         self.state_file_path = os.path.join(self.app_data_dir, STATE_FILE_NAME)
+
+    def _set_application_style(self):
+        """Sets the global stylesheet for the application."""
+        self.setStyleSheet("""
+            QMainWindow {
+                background-color: #2B2B2B; /* Dark gray background */
+            }
+            QWidget {
+                background-color: #2B2B2B;
+                color: #E0E0E0; /* Light gray text */
+                font-family: "Segoe UI", Arial, sans-serif; /* Modern font */
+                font-size: 9pt;
+            }
+            QTabWidget::pane {
+                border-top: 2px solid #3C3F41;
+                background-color: #2B2B2B;
+            }
+            QTabBar::tab {
+                background: #3C3F41; /* Slightly lighter tab background */
+                color: #E0E0E0;
+                border: 1px solid #2B2B2B;
+                border-bottom-color: #3C3F41; /* Same as pane border */
+                border-top-left-radius: 4px;
+                border-top-right-radius: 4px;
+                min-width: 8ex;
+                padding: 8px 12px;
+                margin-right: 2px;
+            }
+            QTabBar::tab:selected {
+                background: #007ACC; /* Vibrant blue for selected tab */
+                color: white;
+                border-color: #007ACC;
+            }
+            QTabBar::tab:hover {
+                background: #4A4A4A; /* Darker hover for tabs */
+            }
+            QToolBar {
+                background: #3C3F41;
+                border: none;
+                padding: 2px;
+            }
+            QToolBar QToolButton {
+                background-color: transparent;
+                color: #E0E0E0;
+                padding: 5px;
+                margin: 2px;
+                border-radius: 3px;
+            }
+            QToolBar QToolButton:hover {
+                background-color: #4F4F4F; /* Slightly lighter hover */
+            }
+            QToolBar QToolButton:pressed {
+                background-color: #007ACC;
+            }
+            QToolBar::separator {
+                height: 1px;
+                background-color: #555555;
+                margin-left: 4px;
+                margin-right: 4px;
+            }
+            QStatusBar {
+                background: #3C3F41;
+                color: #E0E0E0;
+                border-top: 1px solid #555555;
+            }
+            QStatusBar::item {
+                border: none; /* Remove border for items */
+            }
+            QLabel {
+                background-color: transparent; /* Ensure labels have transparent background */
+                padding: 2px;
+            }
+            QPushButton {
+                background-color: #007ACC; /* Vibrant blue */
+                color: white;
+                border: 1px solid #007ACC;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 9pt;
+            }
+            QPushButton:hover {
+                background-color: #005C99; /* Darker blue on hover */
+                border: 1px solid #005C99;
+            }
+            QPushButton:pressed {
+                background-color: #004C80; /* Even darker blue when pressed */
+            }
+            QPushButton:disabled {
+                background-color: #555555;
+                color: #888888;
+                border-color: #555555;
+            }
+            QLineEdit, QSpinBox, QComboBox {
+                background-color: #3C3F41; /* Dark input background */
+                color: #E0E0E0;
+                border: 1px solid #555555; /* Subtle border */
+                padding: 6px;
+                border-radius: 3px;
+                selection-background-color: #007ACC; /* Blue selection */
+                selection-color: white;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                subcontrol-origin: border;
+                background-color: #555555;
+                border-radius: 1px;
+                border: 1px solid #666666;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                background-color: #6E6E6E;
+            }
+            QSpinBox::up-arrow, QSpinBox::down-arrow {
+                color: #E0E0E0;
+                width: 10px;
+                height: 10px;
+            }
+            QComboBox::drop-down {
+                subcontrol-origin: padding;
+                subcontrol-position: top right;
+                width: 20px;
+                border-left-width: 1px;
+                border-left-color: #555555;
+                border-left-style: solid;
+                border-top-right-radius: 3px;
+                border-bottom-right-radius: 3px;
+                background-color: #555555;
+            }
+            QComboBox::down-arrow {
+                 image: url(D:/delete/Test/src/gui/icons/down_arrow.png); /* You may need to provide a path to an icon or use a standard one */
+            }
+             QComboBox QAbstractItemView { /* Dropdown list style */
+                background-color: #3C3F41;
+                border: 1px solid #555555;
+                selection-background-color: #007ACC;
+                color: #E0E0E0;
+            }
+            QTableWidget {
+                background-color: #2B2B2B; /* Dark background for table */
+                alternate-background-color: #333333; /* Slightly lighter dark gray for alternating rows */
+                color: #E0E0E0;
+                gridline-color: #3C3F41; /* Grid lines color */
+                border: 1px solid #3C3F41;
+                selection-background-color: #007ACC; /* Blue selection */
+                selection-color: white;
+            }
+            QHeaderView::section {
+                background-color: #3C3F41; /* Header background */
+                color: #E0E0E0;
+                padding: 6px;
+                border: 1px solid #2B2B2B; /* Border for header sections */
+                font-weight: bold;
+            }
+            QProgressBar {
+                border: 1px solid #555555;
+                border-radius: 3px;
+                background-color: #3C3F41;
+                text-align: center;
+                color: #E0E0E0; /* Text color on progress bar */
+            }
+            QProgressBar::chunk {
+                background-color: #40E0D0; /* Vibrant Teal accent for progress */
+                border-radius: 2px;
+                margin: 0.5px; /* Small margin for chunk */
+            }
+            QMenu {
+                background-color: #3C3F41; /* Dark background for menu */
+                color: #E0E0E0;
+                border: 1px solid #555555; /* Border for menu */
+                padding: 5px;
+            }
+            QMenu::item {
+                padding: 8px 20px;
+                background-color: transparent;
+            }
+            QMenu::item:selected {
+                background-color: #007ACC; /* Blue selection in menu */
+                color: white;
+            }
+            QMenu::separator {
+                height: 1px;
+                background: #555555;
+                margin-left: 10px;
+                margin-right: 5px;
+            }
+            QSplitter::handle {
+                background-color: #3C3F41;
+                border: 1px solid #2B2B2B;
+            }
+            QSplitter::handle:horizontal {
+                width: 5px;
+            }
+            QSplitter::handle:vertical {
+                height: 5px;
+            }
+            QSplitter::handle:hover {
+                background-color: #4F4F4F;
+            }
+            QScrollBar:vertical {
+                border: 1px solid #3C3F41;
+                background: #2B2B2B;
+                width: 12px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #4F4F4F;
+                min-height: 20px;
+                border-radius: 6px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                border: none;
+                background: none;
+            }
+            QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+                background: none;
+            }
+            QScrollBar:horizontal {
+                border: 1px solid #3C3F41;
+                background: #2B2B2B;
+                height: 12px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:horizontal {
+                background: #4F4F4F;
+                min-width: 20px;
+                border-radius: 6px;
+            }
+            QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+                border: none;
+                background: none;
+            }
+            QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+                background: none;
+            }
+            QDialog {
+                background-color: #2B2B2B;
+            }
+            QGroupBox {
+                background-color: #3C3F41;
+                border: 1px solid #555555;
+                border-radius: 4px;
+                margin-top: 10px; /* make space for title */
+                padding: 10px 5px 5px 5px;
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top left; /* position at the top center */
+                padding: 0 3px;
+                background-color: #3C3F41;
+                color: #E0E0E0;
+                left: 10px;
+            }
+            QCheckBox {
+                spacing: 5px;
+                color: #E0E0E0;
+            }
+            QCheckBox::indicator {
+                width: 16px;
+                height: 16px;
+                border: 1px solid #555555;
+                border-radius: 3px;
+                background-color: #2B2B2B;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #40E0D0; /* Teal accent */
+                border: 1px solid #40E0D0;
+                image: url(D:/delete/Test/src/gui/icons/checkbox_checked.png); /* You might need to provide this icon */
+            }
+            QCheckBox::indicator:unchecked:hover {
+                border: 1px solid #40E0D0;
+            }
+            QCheckBox::indicator:disabled {
+                background-color: #444444;
+                border: 1px solid #555555;
+            }
+            /* Ensure item-views like tables and lists properly show selection over alternating rows */
+            QTableView::item:alternate {
+                background-color: #333333;
+            }
+            QTableView::item:selected {
+                background-color: #007ACC; /* Ensure selection overrides alternate color */
+                color: white;
+            }
+            QListView::item:alternate {
+                background-color: #333333;
+            }
+            QListView::item:selected {
+                background-color: #007ACC;
+                color: white;
+            }
+        """)
 
     def load_app_state(self):
         """Load application state from disk."""
@@ -303,6 +593,10 @@ class MainWindow(QMainWindow):
         self.statusbar.addPermanentWidget(self.status_download)
         self.statusbar.addPermanentWidget(self.status_upload)
         
+        # Style status bar labels for better visibility
+        for status_label_widget in [self.status_dht_icon, self.status_dht_label, self.status_download, self.status_upload]:
+            status_label_widget.setStyleSheet("padding: 2px 5px; color: #C0C0C0; background-color: transparent;")
+
         # Setup update timer for status
         self.update_timer = QTimer()
         self.update_timer.setInterval(1000)
@@ -311,6 +605,9 @@ class MainWindow(QMainWindow):
         
         # Connect detail widget signals
         self.torrent_detail_widget.file_priority_changed.connect(self.on_file_priority_changed)
+        
+        # Apply a name to the main splitter for styling
+        self.main_splitter.setObjectName("MainSplitter")
         
     def setup_toolbar(self):
         """Setup the main toolbar"""
@@ -346,6 +643,9 @@ class MainWindow(QMainWindow):
         self.action_settings = QAction(self.style().standardIcon(QStyle.SP_FileDialogDetailedView), "Settings", self)
         self.action_settings.triggered.connect(self.show_settings)
         self.toolbar.addAction(self.action_settings)
+        
+        # Set object name for the toolbar to allow specific styling if needed
+        self.toolbar.setObjectName("MainToolBar")
         
     def setup_torrents_tab(self):
         """Setup the torrents tab"""
@@ -413,26 +713,96 @@ class MainWindow(QMainWindow):
     def on_torrent_completed(self, info_hash):
         """Handle torrent completed signal"""
         # Show notification
-        QMessageBox.information(self, "Download Complete", 
-                               f"Torrent download complete: {self.torrent_client.torrents[info_hash].get_status()['name']}")
+        if info_hash in self.torrent_client.torrents: # Check if torrent still exists
+            torrent_name = self.torrent_client.torrents[info_hash].get_status()['name']
+            self.show_system_notification("Download Complete", f"Torrent '{torrent_name}' has finished downloading.")
+
+            # Standard QMessageBox as fallback or primary
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Information)
+            msg_box.setWindowTitle("Download Complete")
+            msg_box.setText(f"Torrent download complete: {torrent_name}")
+            msg_box.setStandardButtons(QMessageBox.Ok)
+            # Apply stylesheet to QMessageBox to match the theme
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #2B2B2B;
+                    color: #E0E0E0;
+                    font-family: "Segoe UI", Arial, sans-serif;
+                }
+                QMessageBox QLabel { /* For the text label */
+                    color: #E0E0E0;
+                    background-color: transparent;
+                }
+                QMessageBox QPushButton { /* Style buttons inside QMessageBox */
+                    background-color: #007ACC;
+                    color: white;
+                    border: 1px solid #007ACC;
+                    padding: 6px 12px;
+                    border-radius: 3px;
+                    min-width: 70px;
+                }
+                QMessageBox QPushButton:hover {
+                    background-color: #005C99;
+                }
+                QMessageBox QPushButton:pressed {
+                    background-color: #004C80;
+                }
+            """)
+            msg_box.exec_()
         
     def update_status(self):
         """Update status information periodically"""
         # Update DHT status
+        dht_icon_size = QSize(16,16) # Define size once
         if self.torrent_client.session.is_dht_running():
             dht_nodes = self.torrent_client.session.status().dht_nodes
             self.status_dht_label.setText(f"DHT: {dht_nodes} nodes")
-            self.status_dht_icon.setPixmap(self.style().standardIcon(QStyle.SP_DialogApplyButton).pixmap(QSize(16,16))) # Green check / connected icon
+            # Consider using themed icons or simple colored indicators
+            # For simplicity, using standard icons for now and hoping they adapt or are neutral
+            self.status_dht_icon.setPixmap(self.style().standardIcon(QStyle.SP_DialogApplyButton).pixmap(dht_icon_size))
             self.status_dht_icon.setToolTip("DHT Connected")
         else:
-            self.status_dht_label.setText("DHT: Off")
-            self.status_dht_icon.setPixmap(self.style().standardIcon(QStyle.SP_DialogCancelButton).pixmap(QSize(16,16))) # Red X / disconnected icon
+            self.status_dht_label.setText("DHT: Disconnected")
+            self.status_dht_icon.setPixmap(self.style().standardIcon(QStyle.SP_DialogCancelButton).pixmap(dht_icon_size))
             self.status_dht_icon.setToolTip("DHT Disconnected")
         
     def on_error(self, error_message):
         """Handle error messages"""
-        QMessageBox.critical(self, "Error", error_message)
-        
+        # QMessageBox.critical(self, "Error", error_message)
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Critical)
+        msg_box.setWindowTitle("Error")
+        msg_box.setText(error_message)
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        # Apply stylesheet to QMessageBox to match the theme
+        msg_box.setStyleSheet("""
+            QMessageBox {
+                background-color: #2B2B2B;
+                color: #E0E0E0;
+                font-family: "Segoe UI", Arial, sans-serif;
+            }
+            QMessageBox QLabel {
+                color: #E0E0E0;
+                background-color: transparent;
+            }
+            QMessageBox QPushButton {
+                background-color: #D32F2F; /* Red for error dialog buttons */
+                color: white;
+                border: 1px solid #D32F2F;
+                padding: 6px 12px;
+                border-radius: 3px;
+                min-width: 70px;
+            }
+            QMessageBox QPushButton:hover {
+                background-color: #B71C1C;
+            }
+            QMessageBox QPushButton:pressed {
+                background-color: #9F1919;
+            }
+        """)
+        msg_box.exec_()
+
     def add_torrent_dialog(self):
         """Show dialog to add a torrent file"""
         file_path, _ = QFileDialog.getOpenFileName(
@@ -447,7 +817,8 @@ class MainWindow(QMainWindow):
             if save_path:
                 torrent = self.torrent_client.add_torrent(file_path, save_path)
                 if not torrent:
-                    QMessageBox.warning(self, "Warning", "Failed to add torrent. Check the error message for details.")
+                    # QMessageBox.warning(self, "Warning", "Failed to add torrent. Check the error message for details.")
+                    self.show_themed_warning("Warning", "Failed to add torrent. Check logs for details.")
                 
     def add_magnet_dialog(self):
         """Show dialog to add a magnet link"""
@@ -457,7 +828,8 @@ class MainWindow(QMainWindow):
         
         if ok and magnet_link:
             if not magnet_link.startswith('magnet:'):
-                QMessageBox.warning(self, "Invalid Link", "Please enter a valid magnet link starting with 'magnet:'")
+                # QMessageBox.warning(self, "Invalid Link", "Please enter a valid magnet link starting with 'magnet:'")
+                self.show_themed_warning("Invalid Link", "Please enter a valid magnet link starting with 'magnet:'.")
                 return
                 
             save_path = QFileDialog.getExistingDirectory(
@@ -467,7 +839,8 @@ class MainWindow(QMainWindow):
             if save_path:
                 torrent = self.torrent_client.add_torrent(magnet_link, save_path)
                 if not torrent:
-                    QMessageBox.warning(self, "Warning", "Failed to add magnet link. Check the error message for details.")
+                    # QMessageBox.warning(self, "Warning", "Failed to add magnet link. Check the error message for details.")
+                    self.show_themed_warning("Warning", "Failed to add magnet link. Check logs for details.")
                 
     def download_from_search(self, magnet_link):
         """Download a torrent from search results"""
@@ -478,7 +851,8 @@ class MainWindow(QMainWindow):
         if save_path:
             torrent = self.torrent_client.add_torrent(magnet_link, save_path)
             if not torrent:
-                QMessageBox.warning(self, "Warning", "Failed to add torrent from search. Check the error message for details.")
+                # QMessageBox.warning(self, "Warning", "Failed to add torrent from search. Check the error message for details.")
+                self.show_themed_warning("Warning", "Failed to add torrent from search. Check logs for details.")
             else:
                 # Switch to the Torrents tab
                 for i in range(self.tab_widget.count()):
@@ -539,7 +913,8 @@ class MainWindow(QMainWindow):
             if os.path.isdir(new_save_path): # Basic validation
                 self.default_save_path = new_save_path
             else:
-                QMessageBox.warning(self, "Invalid Path", f"The specified download path is not valid: {new_save_path}")
+                # QMessageBox.warning(self, "Invalid Path", f"The specified download path is not valid: {new_save_path}")
+                self.show_themed_warning("Invalid Path", f"The specified download path is not valid: {new_save_path}")
                 # Optionally, do not proceed with other settings if path is critical and invalid
 
             # Apply and save interface settings
@@ -557,12 +932,31 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle window close event"""
         # Optionally, skip confirmation if a setting indicates so
-        reply = QMessageBox.question(
-            self, "Confirm Exit",
-            "Are you sure you want to exit? Active downloads will be stopped, and state will be saved.",
-            QMessageBox.Yes | QMessageBox.No,
-            QMessageBox.No
-        ) if self.confirm_on_exit_flag else QMessageBox.Yes # Skip if flag is false
+        if self.confirm_on_exit_flag:
+            msg_box = QMessageBox(self)
+            msg_box.setIcon(QMessageBox.Question)
+            msg_box.setWindowTitle("Confirm Exit")
+            msg_box.setText("Are you sure you want to exit? Active downloads will be stopped, and state will be saved.")
+            msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+            msg_box.setDefaultButton(QMessageBox.No)
+            # Apply stylesheet
+            msg_box.setStyleSheet("""
+                QMessageBox {
+                    background-color: #2B2B2B; color: #E0E0E0;
+                    font-family: "Segoe UI", Arial, sans-serif;
+                }
+                QMessageBox QLabel { color: #E0E0E0; background-color: transparent; }
+                QMessageBox QPushButton {
+                    background-color: #007ACC; color: white;
+                    border: 1px solid #007ACC; padding: 6px 12px;
+                    border-radius: 3px; min-width: 70px;
+                }
+                QMessageBox QPushButton:hover { background-color: #005C99; }
+                QMessageBox QPushButton:pressed { background-color: #004C80; }
+            """)
+            reply = msg_box.exec_()
+        else:
+            reply = QMessageBox.Yes
         
         if reply == QMessageBox.Yes:
             print("Saving application state before closing...")
@@ -638,4 +1032,55 @@ class MainWindow(QMainWindow):
                 # self.torrent_table.update_torrent_status(status) 
             QMessageBox.information(self, "Priority Set", f"Priority for file index {file_index} set to {priority_level}.")
         else:
-            QMessageBox.warning(self, "Error", "Could not set file priority. Check logs.") 
+            # QMessageBox.warning(self, "Error", "Could not set file priority. Check logs.")
+            self.show_themed_warning("Error Setting Priority", "Could not set file priority. Check logs.")
+
+    def show_system_notification(self, title, message):
+        """Shows a system tray notification if available."""
+        if QSystemTrayIcon.isSystemTrayAvailable():
+            if not hasattr(self, 'tray_icon'):
+                self.tray_icon = QSystemTrayIcon(self)
+                # You'll need an icon for the tray. Using a standard one for now.
+                self.tray_icon.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+                self.tray_icon.setVisible(True) # Make it visible to show messages
+            self.tray_icon.showMessage(title, message, QSystemTrayIcon.Information, 5000) # 5 sec
+        else:
+            print(f"System tray not available. Notification: {title} - {message}")
+
+    def show_themed_warning(self, title, message):
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Warning)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        msg_box.setStyleSheet("""
+            QMessageBox { background-color: #2B2B2B; color: #E0E0E0; font-family: "Segoe UI", Arial, sans-serif; }
+            QMessageBox QLabel { color: #E0E0E0; background-color: transparent; }
+            QMessageBox QPushButton {
+                background-color: #FFA000; color: black; /* Amber/Orange for warning */
+                border: 1px solid #FFA000; padding: 6px 12px;
+                border-radius: 3px; min-width: 70px;
+            }
+            QMessageBox QPushButton:hover { background-color: #FF8F00; }
+            QMessageBox QPushButton:pressed { background-color: #FF6F00; }
+        """)
+        msg_box.exec_()
+
+    def show_themed_info(self, title, message):
+        msg_box = QMessageBox(self)
+        msg_box.setIcon(QMessageBox.Information)
+        msg_box.setWindowTitle(title)
+        msg_box.setText(message)
+        msg_box.setStandardButtons(QMessageBox.Ok)
+        msg_box.setStyleSheet("""
+            QMessageBox { background-color: #2B2B2B; color: #E0E0E0; font-family: "Segoe UI", Arial, sans-serif; }
+            QMessageBox QLabel { color: #E0E0E0; background-color: transparent; }
+            QMessageBox QPushButton {
+                background-color: #007ACC; color: white;
+                border: 1px solid #007ACC; padding: 6px 12px;
+                border-radius: 3px; min-width: 70px;
+            }
+            QMessageBox QPushButton:hover { background-color: #005C99; }
+            QMessageBox QPushButton:pressed { background-color: #004C80; }
+        """)
+        msg_box.exec_() 

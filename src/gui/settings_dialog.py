@@ -3,6 +3,7 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QTabWidget, QWidget, QGroupBox, QFormLayout,
                             QCheckBox, QComboBox)
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QStyle
 import libtorrent as lt
 
 class SettingsDialog(QDialog):
@@ -71,6 +72,7 @@ class SettingsDialog(QDialog):
         self.save_path_edit.setText(self.parent().default_save_path)
         
         self.browse_button = QPushButton("Browse...")
+        self.browse_button.setIcon(self.style().standardIcon(QStyle.SP_DirOpenIcon))
         self.browse_button.clicked.connect(self.browse_save_path)
         
         download_layout.addWidget(self.save_path_edit)
