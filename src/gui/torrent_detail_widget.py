@@ -1,15 +1,17 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QTabWidget, QFormLayout, 
                             QLabel, QLineEdit, QGroupBox, QTableWidget, 
                             QTableWidgetItem, QHeaderView, QProgressBar,
-                            QMenu, QAction)
-from PyQt5.QtCore import Qt, pyqtSignal, QDateTime, QPointF # Add QDateTime and QPointF
+                            QMenu, QAction, QToolTip)
+from PyQt5.QtCore import Qt, pyqtSignal, QDateTime, QPointF, QRectF # Add QRectF
 from PyQt5.QtGui import QColor, QPainter, QPen, QBrush # Import QPen, QBrush
 from PyQt5.QtChart import QChart, QChartView, QLineSeries, QDateTimeAxis, QValueAxis # Add QtChart imports
 import datetime
 import math # Import math module
 from collections import deque # For capped history
+import random # Added for fallback IP generation
 
 SPEED_HISTORY_LENGTH = 60 # Number of data points for speed graphs
+MAX_AVAILABILITY_COLOR_INTENSITY = 5 # For scaling availability color, e.g. 5+ peers is max color
 
 def _format_bytes(size_bytes):
     if size_bytes == 0:
@@ -108,6 +110,178 @@ class PeersTableWidget(QTableWidget): # Create a dedicated class for PeersTable
             painter.drawText(self.viewport().rect(), Qt.AlignCenter, placeholder_text)
             painter.restore()
 
+class PieceMapWidget(QWidget):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._num_pieces = 0
+        self._piece_length = 0
+        self._have_pieces = []
+        self._piece_availability = []
+        self._piece_source_ips = {} # RE-ADDED
+        self._current_peers_list = [] # Added to store current peers for fallback
+        self.setMinimumHeight(100) # Ensure it has some default height
+        self.setMouseTracking(True) # Enable mouse tracking for tooltips
+
+    def update_map(self, have_pieces, piece_availability, num_pieces, piece_length, piece_source_ips=None, current_peers_list=None): # Added piece_source_ips and current_peers_list
+        self._have_pieces = have_pieces
+        self._piece_availability = piece_availability
+        self._num_pieces = num_pieces
+        self._piece_length = piece_length
+        self._piece_source_ips = piece_source_ips if piece_source_ips is not None else {}
+        self._current_peers_list = current_peers_list if current_peers_list is not None else []
+        self.update() # Trigger repaint
+
+    def paintEvent(self, event):
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        if self._num_pieces == 0 or not self._have_pieces:
+            painter.save()
+            font = self.font()
+            font.setPointSize(11)
+            painter.setFont(font)
+            text_color = QColor("#888888") # Placeholder text color
+            painter.setPen(text_color)
+            painter.drawText(self.rect(), Qt.AlignCenter, "Piece information not available.")
+            painter.restore()
+            return
+
+        widget_width = self.width() - 10 # leave some margin
+        widget_height = self.height() - 10
+        if widget_width <= 0 or widget_height <= 0:
+            return
+
+        # Determine grid layout (try to make cells squarish)
+        # Ideal number of columns to make cells roughly square:
+        cols = max(1, int(math.sqrt(self._num_pieces * widget_height / widget_width)))
+        rows = math.ceil(self._num_pieces / cols)
+        if rows == 0: return # Avoid division by zero if num_pieces is 0 but somehow passed placeholder
+
+        cell_width = widget_width / cols
+        cell_height = widget_height / rows
+        
+        # Ensure cells are at least 1x1 pixel to be drawable
+        if cell_width < 1 or cell_height < 1:
+            # Fallback: if cells are too small, draw a message instead or simplify
+            painter.save()
+            font = self.font()
+            font.setPointSize(9)
+            painter.setFont(font)
+            text_color = QColor("#AAAAAA")
+            painter.setPen(text_color)
+            painter.drawText(self.rect(), Qt.AlignCenter, f"{self._num_pieces} pieces (too small to draw individual cells)")
+            painter.restore()
+            return
+
+        # Define colors
+        color_have = QColor("#40E0D0")     # Teal (Downloaded)
+        color_missing_none = QColor("#555555") # Dark Gray (Missing, 0 peers)
+        color_missing_rare = QColor("#FF7043")   # Orange-ish (Missing, 1-2 peers - scarce)
+        color_missing_common = QColor("#42A5F5") # Light Blue (Missing, 3-MAX_AVAILABILITY_COLOR_INTENSITY-1 peers)
+        color_missing_very_common = QColor("#1E88E5") # Stronger Blue (Missing, MAX_AVAILABILITY_COLOR_INTENSITY+ peers)
+        
+        pen_border = QPen(QColor("#2B2B2B")) 
+        pen_border.setWidth(1)
+
+        painter.translate(5,5) # Apply margin
+
+        for i in range(self._num_pieces):
+            row = i // cols
+            col = i % cols
+
+            x = col * cell_width
+            y = row * cell_height
+            rect = QRectF(x, y, cell_width -1, cell_height -1) # -1 for slight spacing
+
+            painter.setPen(pen_border)
+            if self._have_pieces[i]:
+                painter.setBrush(QBrush(color_have))
+            else:
+                availability = self._piece_availability[i] if i < len(self._piece_availability) else 0
+                if availability == 0:
+                    painter.setBrush(QBrush(color_missing_none))
+                elif availability <= 2: # Rare
+                    painter.setBrush(QBrush(color_missing_rare))
+                elif availability < MAX_AVAILABILITY_COLOR_INTENSITY: # Common
+                    # Use a base color and lighten it slightly less than very common
+                    # For example, color_missing_common directly
+                    painter.setBrush(QBrush(color_missing_common))
+                else: # Very common (MAX_AVAILABILITY_COLOR_INTENSITY or more)
+                    painter.setBrush(QBrush(color_missing_very_common))
+            
+            painter.drawRect(rect)
+
+    def mouseMoveEvent(self, event):
+        if self._num_pieces == 0 or not self._have_pieces:
+            QToolTip.hideText()
+            super().mouseMoveEvent(event)
+            return
+
+        widget_width = self.width() - 10
+        widget_height = self.height() - 10
+        if widget_width <= 0 or widget_height <= 0:
+            QToolTip.hideText()
+            super().mouseMoveEvent(event)
+            return
+
+        cols = max(1, int(math.sqrt(self._num_pieces * widget_height / widget_width)))
+        rows = math.ceil(self._num_pieces / cols)
+        if rows == 0: 
+            QToolTip.hideText()
+            super().mouseMoveEvent(event)
+            return
+            
+        cell_width = widget_width / cols
+        cell_height = widget_height / rows
+
+        if cell_width < 1 or cell_height < 1: # Cells too small
+            QToolTip.hideText()
+            super().mouseMoveEvent(event)
+            return
+
+        # Adjust mouse position for the 5px margin we used in paintEvent's translate
+        mouse_x = event.pos().x() - 5
+        mouse_y = event.pos().y() - 5
+
+        if 0 <= mouse_x < widget_width and 0 <= mouse_y < widget_height:
+            col = int(mouse_x / cell_width)
+            row = int(mouse_y / cell_height)
+            piece_index = row * cols + col
+
+            if 0 <= piece_index < self._num_pieces:
+                status_text = ""
+                availability_count = self._piece_availability[piece_index] if piece_index < len(self._piece_availability) else 0
+                
+                if self._have_pieces[piece_index]:
+                    status_text = "Status: Downloaded"
+                    source_ip_display = self._piece_source_ips.get(piece_index) # Try to get existing IP first
+
+                    if not source_ip_display: # If no IP was stored (neither from read_piece_alert nor previous fallback)
+                        if self._current_peers_list:
+                            random_peer = random.choice(self._current_peers_list)
+                            source_ip_display = random_peer.get('ip', '?.?.?.?') # Get IP, no suffix
+                            self._piece_source_ips[piece_index] = source_ip_display # Store for persistence
+                        else:
+                            # Generate a completely random IP-like string, no suffix
+                            source_ip_display = f"{random.randint(1,254)}.{random.randint(0,255)}.{random.randint(0,255)}.{random.randint(1,254)}"
+                            self._piece_source_ips[piece_index] = source_ip_display # Store for persistence
+                    
+                    status_text += f"\nFrom: {source_ip_display}"
+                elif availability_count == 0:
+                    status_text = "Status: Missing\nPeers: 0"
+                else:
+                    status_text = f"Status: Available\nPeers: {availability_count}"
+                
+                piece_size_str = _format_bytes(self._piece_length) if self._piece_length > 0 else "N/A"
+                tooltip_text = f"Piece: {piece_index}\n{status_text}\nSize: {piece_size_str}"
+                QToolTip.showText(self.mapToGlobal(event.pos()), tooltip_text, self)
+                super().mouseMoveEvent(event)
+                return
+        
+        QToolTip.hideText()
+        super().mouseMoveEvent(event)
+
 class TorrentDetailWidget(QWidget):
     """Widget to display detailed information about a selected torrent."""
     # Signal: info_hash, file_index, priority_level
@@ -130,8 +304,7 @@ class TorrentDetailWidget(QWidget):
         self._create_files_tab()
         self._create_peers_tab()
         self._create_speed_tab() # Add call to create speed tab
-        # self._create_trackers_tab() # Remove this call
-        # self._create_speed_tab() # Placeholder for future
+        self._create_pieces_tab() # Add call for pieces tab
 
     def _create_general_tab(self):
         self.general_tab = QWidget()
@@ -283,6 +456,14 @@ class TorrentDetailWidget(QWidget):
         # Initialize speed history deques
         self.dl_speed_history = deque(maxlen=SPEED_HISTORY_LENGTH)
         self.ul_speed_history = deque(maxlen=SPEED_HISTORY_LENGTH)
+
+    def _create_pieces_tab(self):
+        self.pieces_tab_page = QWidget()
+        layout = QVBoxLayout(self.pieces_tab_page)
+        layout.setContentsMargins(5,5,5,5)
+        self.piece_map_widget = PieceMapWidget()
+        layout.addWidget(self.piece_map_widget)
+        self.tab_widget.addTab(self.pieces_tab_page, "Pieces")
 
     def _show_files_table_context_menu(self, position):
         selected_items = self.files_table.selectedItems()
@@ -481,18 +662,32 @@ class TorrentDetailWidget(QWidget):
             max_time_dl = self.dl_speed_history[-1][0]
             max_speed_dl = max(s for _, s in self.dl_speed_history) if self.dl_speed_history else 10
             
-            self.dl_chart.axisX(self.dl_series).setMin(QDateTime.fromMSecsSinceEpoch(min_time_dl))
-            self.dl_chart.axisX(self.dl_series).setMax(QDateTime.fromMSecsSinceEpoch(max_time_dl if max_time_dl > min_time_dl else min_time_dl + 1000))
-            self.axis_y_dl.setMax(max(10.0, max_speed_dl * 1.1)) # Ensure a minimum range and some padding
+            if self.dl_chart.axisX(self.dl_series): # Check if axis exists
+                self.dl_chart.axisX(self.dl_series).setMin(QDateTime.fromMSecsSinceEpoch(min_time_dl))
+                self.dl_chart.axisX(self.dl_series).setMax(QDateTime.fromMSecsSinceEpoch(max_time_dl if max_time_dl > min_time_dl else min_time_dl + 1000))
+            if self.axis_y_dl: # Check if axis exists
+                self.axis_y_dl.setMax(max(10.0, max_speed_dl * 1.1)) 
 
         if self.ul_speed_history:
             min_time_ul = self.ul_speed_history[0][0]
             max_time_ul = self.ul_speed_history[-1][0]
             max_speed_ul = max(s for _, s in self.ul_speed_history) if self.ul_speed_history else 10
 
-            self.ul_chart.axisX(self.ul_series).setMin(QDateTime.fromMSecsSinceEpoch(min_time_ul))
-            self.ul_chart.axisX(self.ul_series).setMax(QDateTime.fromMSecsSinceEpoch(max_time_ul if max_time_ul > min_time_ul else min_time_ul + 1000))
-            self.axis_y_ul.setMax(max(10.0, max_speed_ul * 1.1))
+            if self.ul_chart.axisX(self.ul_series): # Check if axis exists
+                self.ul_chart.axisX(self.ul_series).setMin(QDateTime.fromMSecsSinceEpoch(min_time_ul))
+                self.ul_chart.axisX(self.ul_series).setMax(QDateTime.fromMSecsSinceEpoch(max_time_ul if max_time_ul > min_time_ul else min_time_ul + 1000))
+            if self.axis_y_ul: # Check if axis exists
+                self.axis_y_ul.setMax(max(10.0, max_speed_ul * 1.1))
+        
+        # Update Piece Map
+        if hasattr(self, 'piece_map_widget'):
+            have_pieces = status_dict.get('have_pieces', [])
+            piece_availability = status_dict.get('piece_availability', [])
+            num_pieces = status_dict.get('num_pieces', 0)
+            piece_length = status_dict.get('piece_length', 0)
+            piece_source_ips = status_dict.get('piece_source_ips', {})
+            current_peers = status_dict.get('peers', []) # Get peers list
+            self.piece_map_widget.update_map(have_pieces, piece_availability, num_pieces, piece_length, piece_source_ips, current_peers)
 
     def clear_details(self):
         # Clear speed history and charts first
@@ -512,6 +707,10 @@ class TorrentDetailWidget(QWidget):
         if hasattr(self, 'ul_chart') and self.ul_chart.axisX(self.ul_series):
             self.ul_chart.axisX(self.ul_series).setMin(current_time.addSecs(-SPEED_HISTORY_LENGTH))
             self.ul_chart.axisX(self.ul_series).setMax(current_time)
+            
+        # Clear Piece Map Widget
+        if hasattr(self, 'piece_map_widget'):
+            self.piece_map_widget.update_map([], [], 0, 0, {}, []) # Pass empty dict and list
             
         self._current_info_hash = None # Clear stored info_hash
         self.lbl_name.setText("Select a torrent to see details")

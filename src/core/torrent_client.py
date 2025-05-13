@@ -28,6 +28,7 @@ class TorrentHandle(QObject):
         self.num_pieces = 0
         self.piece_length = 0
         self.is_completed_flag = False # New flag for completion status
+        self.piece_source_ips = {} # RE-ADDED
         
     def get_status(self):
         """Get current status of the torrent"""
@@ -121,6 +122,42 @@ class TorrentHandle(QObject):
             # Calculate Ratio
             ratio = status.total_payload_upload / status.total_payload_download if status.total_payload_download > 0 else 0.0
 
+            # --- Piece Information for Piece Map ---
+            have_pieces_list = []
+            piece_availability_list = []
+            if self.handle.has_metadata() and self.num_pieces > 0:
+                # Get pieces we have
+                # Note: status.pieces is a vector of piece indices we have, not a bitmask.
+                # Using handle.have_piece(i) is more straightforward for a full boolean list.
+                have_pieces_list = [self.handle.have_piece(i) for i in range(self.num_pieces)]
+
+                # Get per-piece availability from connected peers
+                # In libtorrent 2.x, torrent_status.piece_availability() returns std::vector<int>
+                # This needs to be called on the status object from handle.status()
+                current_torrent_status = self.handle.status() # Re-fetch if status might be stale or ensure it includes piece_availability
+                if hasattr(current_torrent_status, 'piece_availability'):
+                    # The piece_availability member is a method that fills a passed-in list in some bindings
+                    # or returns a list-like object. Assuming it returns a list-like that can be converted.
+                    try:
+                        # For lt 2.0, status.piece_availability is a property returning the vector
+                        raw_availability = current_torrent_status.piece_availability
+                        if raw_availability and len(raw_availability) == self.num_pieces:
+                             piece_availability_list = list(raw_availability)
+                        else:
+                            # Fallback if piece_availability is not what we expect or wrong size
+                            logger.debug(f"piece_availability from status was not as expected for {name}. Size: {len(raw_availability) if raw_availability else 'None'} vs num_pieces: {self.num_pieces}")
+                            piece_availability_list = [0] * self.num_pieces # Fallback
+                    except Exception as e:
+                        logger.warning(f"Could not get piece_availability for {name}: {e}")
+                        piece_availability_list = [0] * self.num_pieces # Fallback
+                else:
+                    piece_availability_list = [0] * self.num_pieces # Fallback if attribute not found
+            else:
+                 # Ensure lists are initialized even if no metadata (e.g. for magnets before metadata)
+                 have_pieces_list = [False] * (self.num_pieces if self.num_pieces > 0 else 0)
+                 piece_availability_list = [0] * (self.num_pieces if self.num_pieces > 0 else 0)
+            # --- End Piece Information ---
+
             # Build status dictionary
             status_dict = {
                 'name': name,
@@ -146,7 +183,10 @@ class TorrentHandle(QObject):
                 'piece_length': self.piece_length,
                 'distributed_copies': status.distributed_copies, # Availability
                 'files': self.files if self.handle.has_metadata() else [], # Add files list to status_dict
-                'peers': peer_list
+                'peers': peer_list,
+                'have_pieces': have_pieces_list, # Added for Piece Map
+                'piece_availability': piece_availability_list, # Added for Piece Map
+                'piece_source_ips': self.piece_source_ips # RE-ADDED
             }
             
             return status_dict
@@ -310,7 +350,7 @@ class TorrentClient(QObject):
         
         # Apply settings
         settings = {
-            'alert_mask': lt.alert.category_t.all_categories,
+            'alert_mask': lt.alert.category_t.all_categories | lt.alert.category_t.piece_progress_notification, # Ensure piece_progress is included
             'enable_dht': True,
             'enable_lsd': True,
             'enable_natpmp': True,
@@ -544,6 +584,8 @@ class TorrentClient(QObject):
             try:
                 alerts = self.session.pop_alerts()
                 for alert in alerts:
+                    # Log every alert type received
+                    # logger.debug(f"Received alert: {type(alert).__name__}")
                     info_hash_str = None
                     if hasattr(alert, 'handle') and alert.handle.is_valid():
                         info_hash_str = str(alert.handle.info_hash())
@@ -626,6 +668,15 @@ class TorrentClient(QObject):
                         else:
                             logger.error(f"Save resume data failed: {alert.error} (handle no longer valid or unknown)")
                     
+                    elif isinstance(alert, lt.read_piece_alert): # RE-ADDING read_piece_alert block
+                        if info_hash_str and info_hash_str in self.torrents:
+                            torrent_obj = self.torrents[info_hash_str]
+                            peer_ip_tuple = alert.peer 
+                            if peer_ip_tuple and len(peer_ip_tuple) > 0:
+                                peer_ip_str = peer_ip_tuple[0]
+                                torrent_obj.piece_source_ips[alert.piece_index] = peer_ip_str
+                                # logger.debug(f"Piece {alert.piece_index} for {info_hash_str} read, source IP {peer_ip_str} recorded.") # Keep logger commented for now
+
                     # Optional: Log other potentially useful alerts for debugging
                     # elif isinstance(alert, lt.dht_reply_alert):
                     #    logger.debug(f"DHT Reply: {alert.message()}")

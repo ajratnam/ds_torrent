@@ -797,7 +797,7 @@ class MainWindow(QMainWindow):
             if info_hash in self.torrent_client.torrents:
                 torrent_handle_obj = self.torrent_client.torrents[info_hash]
                 status = torrent_handle_obj.get_status()
-                
+
                 if hasattr(self, 'torrent_detail_widget') and status:
                     self.torrent_detail_widget.update_details(status)
             else:
