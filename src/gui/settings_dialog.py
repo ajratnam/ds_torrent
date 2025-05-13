@@ -176,4 +176,12 @@ class SettingsDialog(QDialog):
         )
         
         if path:
-            self.save_path_edit.setText(path) 
+            self.save_path_edit.setText(path)
+            
+    def get_download_limit(self):
+        """Get the download speed limit in KB/s"""
+        return self.download_limit_spin.value()
+        
+    def get_upload_limit(self):
+        """Get the upload speed limit in KB/s"""
+        return self.upload_limit_spin.value() 

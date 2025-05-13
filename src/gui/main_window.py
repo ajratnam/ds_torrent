@@ -1,13 +1,15 @@
 import os
 import sys
 import datetime
+import time
+import json
 from PyQt5.QtWidgets import (QMainWindow, QTabWidget, QWidget, QVBoxLayout,
                             QHBoxLayout, QLabel, QPushButton, QLineEdit,
                             QTableWidget, QTableWidgetItem, QHeaderView,
                             QProgressBar, QFileDialog, QMessageBox, QComboBox,
                             QSplitter, QStatusBar, QAction, QMenu, QToolBar,
-                            QSystemTrayIcon, QInputDialog)
-from PyQt5.QtCore import Qt, QSize, QTimer, pyqtSlot
+                            QSystemTrayIcon, QInputDialog, QDialog)
+from PyQt5.QtCore import Qt, QSize, QTimer, pyqtSlot, QStandardPaths, QByteArray
 from PyQt5.QtGui import QIcon, QFont
 
 # Set runtime directory permissions
@@ -21,13 +23,18 @@ from src.gui.torrent_table import TorrentTableWidget
 from src.gui.search_tab import SearchTab
 from src.gui.settings_dialog import SettingsDialog
 
+APP_NAME = "PythonBitTorrentClient"
+STATE_FILE_NAME = "app_state.json"
+
 class MainWindow(QMainWindow):
     """Main application window"""
     def __init__(self):
         super().__init__()
         
+        self._init_paths()
+
         # Setup core components
-        self.torrent_client = TorrentClient()
+        self.torrent_client = TorrentClient(self.app_data_dir)
         self.search_engine = TorrentSearchEngine()
         
         # Setup UI
@@ -36,9 +43,126 @@ class MainWindow(QMainWindow):
         # Connect signals
         self.connect_signals()
         
-        # Default save path
+        # Default save path (will be overridden by loaded state if available)
         self.default_save_path = os.path.expanduser('~/Downloads')
         
+        self.load_app_state()
+
+    def _init_paths(self):
+        """Initialize application paths."""
+        self.app_data_dir = QStandardPaths.writableLocation(QStandardPaths.AppLocalDataLocation)
+        # Append app name to create a dedicated folder if QStandardPaths doesn't include it
+        # (Behavior might vary by OS/Qt version)
+        if APP_NAME not in self.app_data_dir:
+             self.app_data_dir = os.path.join(self.app_data_dir, APP_NAME)
+
+        if not os.path.exists(self.app_data_dir):
+            try:
+                os.makedirs(self.app_data_dir, exist_ok=True)
+            except OSError as e:
+                print(f"Error creating app data directory {self.app_data_dir}: {e}") # Use print for early errors
+                # Fallback if necessary, or raise
+                self.app_data_dir = "." 
+
+        self.state_file_path = os.path.join(self.app_data_dir, STATE_FILE_NAME)
+
+    def load_app_state(self):
+        """Load application state from disk."""
+        if not os.path.exists(self.state_file_path):
+            print(f"State file not found: {self.state_file_path}. Starting with defaults.")
+            return
+
+        try:
+            with open(self.state_file_path, 'r') as f:
+                state_data = json.load(f)
+        except (IOError, json.JSONDecodeError) as e:
+            print(f"Error loading state file {self.state_file_path}: {e}")
+            return
+
+        # Restore window geometry
+        geom_hex = state_data.get('window_geometry')
+        if geom_hex:
+            self.restoreGeometry(QByteArray.fromHex(geom_hex.encode('ascii')))
+
+        # Restore default save path
+        self.default_save_path = state_data.get('default_save_path', self.default_save_path)
+
+        # Restore torrent client settings (example for limits)
+        client_settings = state_data.get('client_settings', {})
+        download_limit = client_settings.get('download_rate_limit', 0)
+        upload_limit = client_settings.get('upload_rate_limit', 0)
+        self.torrent_client.set_download_limit(download_limit // 1024) # Assuming settings are in bytes/s
+        self.torrent_client.set_upload_limit(upload_limit // 1024)
+
+        # Restore torrents
+        saved_torrents = state_data.get('torrents', [])
+        for torrent_info in saved_torrents:
+            source = torrent_info.get('source')
+            save_path = torrent_info.get('save_path')
+            info_hash = torrent_info.get('info_hash')
+            
+            if not source or not save_path or not info_hash:
+                print(f"Skipping invalid torrent entry: {torrent_info}")
+                continue
+
+            resume_data_bytes = None
+            resume_file = self.torrent_client._get_resume_filepath(info_hash)
+            if os.path.exists(resume_file):
+                try:
+                    with open(resume_file, 'rb') as rf:
+                        resume_data_bytes = rf.read()
+                except IOError as e:
+                    print(f"Error reading resume file {resume_file}: {e}")
+            
+            self.torrent_client.add_torrent(source, save_path, resume_data_bytes)
+        
+        # Restore last active tab
+        last_tab_index = state_data.get('last_tab_index', 0)
+        if 0 <= last_tab_index < self.tab_widget.count():
+            self.tab_widget.setCurrentIndex(last_tab_index)
+        
+        print(f"Application state loaded from {self.state_file_path}")
+
+    def save_app_state(self):
+        """Save current application state to disk."""
+        state_data = {}
+
+        # Save window geometry
+        state_data['window_geometry'] = self.saveGeometry().toHex().data().decode('ascii')
+
+        # Save default save path
+        state_data['default_save_path'] = self.default_save_path
+
+        # Save torrent client settings (example for limits from libtorrent settings)
+        session_settings_pack = self.torrent_client.session.get_settings()
+        state_data['client_settings'] = {
+            'download_rate_limit': session_settings_pack['download_rate_limit'],
+            'upload_rate_limit': session_settings_pack['upload_rate_limit'],
+            # Add other relevant libtorrent settings if managed by your UI
+        }
+
+        # Save active torrents
+        active_torrents_state = []
+        for info_hash, torrent_handle_obj in self.torrent_client.torrents.items():
+            # Request resume data to be generated and saved by the alert handler
+            self.torrent_client.trigger_save_resume_data(info_hash)
+            active_torrents_state.append({
+                'source': torrent_handle_obj.source,
+                'save_path': torrent_handle_obj.save_path,
+                'info_hash': info_hash
+            })
+        state_data['torrents'] = active_torrents_state
+        
+        # Save current active tab
+        state_data['last_tab_index'] = self.tab_widget.currentIndex()
+
+        try:
+            with open(self.state_file_path, 'w') as f:
+                json.dump(state_data, f, indent=4)
+            print(f"Application state saved to {self.state_file_path}")
+        except IOError as e:
+            print(f"Error saving state file {self.state_file_path}: {e}")
+
     def setup_ui(self):
         """Setup the user interface"""
         # Main window properties
@@ -232,7 +356,13 @@ class MainWindow(QMainWindow):
             torrent = self.torrent_client.add_torrent(magnet_link, save_path)
             if not torrent:
                 QMessageBox.warning(self, "Warning", "Failed to add torrent from search. Check the error message for details.")
-            
+            else:
+                # Switch to the Torrents tab
+                for i in range(self.tab_widget.count()):
+                    if self.tab_widget.tabText(i) == "Torrents":
+                        self.tab_widget.setCurrentIndex(i)
+                        break
+                
     def pause_torrent(self, info_hash):
         """Pause a torrent"""
         if info_hash in self.torrent_client.torrents:
@@ -261,27 +391,43 @@ class MainWindow(QMainWindow):
     def show_settings(self):
         """Show settings dialog"""
         dialog = SettingsDialog(self)
-        if dialog.exec_():
+        # TODO: Populate dialog with current settings before showing
+        current_settings = self.torrent_client.session.get_settings()
+        dialog.download_limit_spin.setValue(current_settings['download_rate_limit'] // 1024 if current_settings['download_rate_limit'] > 0 else 0)
+        dialog.upload_limit_spin.setValue(current_settings['upload_rate_limit'] // 1024 if current_settings['upload_rate_limit'] > 0 else 0)
+        # Make sure save_path_edit exists on dialog or self.default_save_path is used correctly
+        # dialog.save_path_edit.setText(self.default_save_path) 
+
+        if dialog.exec_() == QDialog.Accepted: # QDialog.Accepted should now work
             # Apply settings
-            download_limit = dialog.download_limit_spin.value()
-            upload_limit = dialog.upload_limit_spin.value()
+            download_limit = dialog.download_limit_spin.value() 
+            upload_limit = dialog.upload_limit_spin.value()   
             
-            self.torrent_client.set_download_limit(download_limit)
+            self.torrent_client.set_download_limit(download_limit) 
             self.torrent_client.set_upload_limit(upload_limit)
             
             # Save default save path
-            self.default_save_path = dialog.save_path_edit.text()
+            if hasattr(dialog, 'save_path_edit'): # Check if dialog has this attribute
+                 self.default_save_path = dialog.save_path_edit.text()
+            
+            self.save_app_state() 
             
     def closeEvent(self, event):
         """Handle window close event"""
+        # Optionally, skip confirmation if a setting indicates so
         reply = QMessageBox.question(
             self, "Confirm Exit",
-            "Are you sure you want to exit? Active downloads will be stopped.",
+            "Are you sure you want to exit? Active downloads will be stopped, and state will be saved.",
             QMessageBox.Yes | QMessageBox.No,
             QMessageBox.No
         )
         
         if reply == QMessageBox.Yes:
+            print("Saving application state before closing...")
+            self.save_app_state()
+            # Allow some time for async operations like resume data saving to be processed by libtorrent alerts
+            # This is a simple delay; a more robust solution would use signals or event loops.
+            time.sleep(0.5) # Give alerts a moment to process
             event.accept()
         else:
             event.ignore() 
