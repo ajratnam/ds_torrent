@@ -11,7 +11,7 @@ class TorrentProgressBar(QProgressBar):
         super().__init__(parent)
         self.setTextVisible(True)
         # Ensure progress bar text is visible against the dark background
-        self.setStyleSheet("QProgressBar { color: #1E1E1E; } QProgressBar::chunk { background-color: #40E0D0; margin: 0.5px; border-radius: 2px; }")
+        # self.setStyleSheet("QProgressBar { color: #1E1E1E; } QProgressBar::chunk { background-color: #40E0D0; margin: 0.5px; border-radius: 2px; }") # Styling now handled by global style.qss
 
 
 class TorrentTableWidget(QTableWidget):
