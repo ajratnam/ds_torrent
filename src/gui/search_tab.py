@@ -51,8 +51,10 @@ class SearchResultsTable(QTableWidget):
             placeholder_text = "Perform a search to see results."
             if hasattr(parent_tab, 'last_search_had_results') and not parent_tab.last_search_had_results:
                 placeholder_text = "No results found for your search."
-            elif hasattr(parent_tab, 'is_searching') and parent_tab.is_searching:
+            elif hasattr(parent_tab, 'is_searching_flag') and parent_tab.is_searching_flag:
                 return # Don't show placeholder if a search is actively in progress (progress bar is visible)
+            elif hasattr(parent_tab, 'search_sources') and not parent_tab.search_sources:
+                placeholder_text = "No search sources available. Please add sources in settings."
 
             painter = QPainter(self.viewport())
             painter.save()
@@ -83,10 +85,11 @@ class SearchTab(QWidget):
     # Signal when user wants to download a torrent
     download_torrent = pyqtSignal(str)
     
-    def __init__(self, search_engine, parent=None):
+    def __init__(self, search_engine, search_sources, parent=None):
         super().__init__(parent)
         
         self.search_engine = search_engine
+        self.search_sources = search_sources
         self.search_results = []
         self.last_search_had_results = True # Assume true initially, or set based on actual state
         self.is_searching_flag = False # To track if a search is ongoing
@@ -155,6 +158,12 @@ class SearchTab(QWidget):
         if not query:
             return
             
+        if not self.search_sources:
+            QMessageBox.warning(self, "No Search Sources", 
+                                "No search sources configured. Please add sources in Settings.")
+            self.results_table.viewport().update() # Ensure placeholder is updated
+            return
+            
         # Clear previous results
         self.results_table.setRowCount(0)
         self.search_results = []
@@ -170,7 +179,8 @@ class SearchTab(QWidget):
         self.status_label.setText(f"Searching for: {query}")
         
         # Start search
-        self.search_engine.search(query)
+        display_domain = self.search_sources[0] if self.search_sources else None # Get first source for display
+        self.search_engine.search(query, display_domain=display_domain)
         
     @pyqtSlot(list)
     def on_search_completed(self, results):
@@ -262,3 +272,10 @@ class SearchTab(QWidget):
         
         # Emit signal to download
         self.download_torrent.emit(result.magnet_link) 
+
+    def update_search_sources(self, new_sources):
+        """Update the internal list of search sources."""
+        self.search_sources = new_sources
+        # If sources are now available, we might want to refresh the placeholder text
+        # or enable the search button if it was disabled.
+        self.results_table.viewport().update() # Trigger a repaint to update placeholder if needed 

@@ -40,13 +40,14 @@ class TorrentSearchEngine(QObject):
         self.results = []
         self.is_searching = False
         
-    def search(self, query, max_results=50):
+    def search(self, query, max_results=50, display_domain=None):
         """
         Search for torrents across all providers
         
         Args:
             query: Search query string
             max_results: Maximum number of results to return
+            display_domain: The domain to display as the source for these results
         """
         if self.is_searching:
             self.search_error.emit("A search is already in progress")
@@ -54,6 +55,7 @@ class TorrentSearchEngine(QObject):
             
         self.is_searching = True
         self.results = []
+        self.current_display_domain = display_domain
         
         search_thread = Thread(target=self._search_all_providers, args=(query, max_results))
         search_thread.daemon = True
@@ -100,6 +102,7 @@ class TorrentSearchEngine(QObject):
     def _search_thepiratebay(self, query):
         """Search ThePirateBay for torrents"""
         results = []
+        source_to_display = self.current_display_domain if hasattr(self, 'current_display_domain') and self.current_display_domain else "ThePirateBay"
         
         try:
             # Use TPB API
@@ -127,7 +130,7 @@ class TorrentSearchEngine(QObject):
                             leechers=int(torrent.get('leechers', 0)),
                             size=size,
                             magnet_link=magnet_link,
-                            source="ThePirateBay"
+                            source=source_to_display
                         )
                     )
             

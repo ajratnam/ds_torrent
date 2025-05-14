@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self.confirm_on_exit_flag = True # Default
         self.start_minimized_flag = False # Default
         self.show_speed_in_title_flag = False # Default
+        self.search_sources = [] # Default empty list for search sources
         
         # Setup UI
         self.setup_ui()
@@ -133,6 +134,9 @@ class MainWindow(QMainWindow):
         self.confirm_on_exit_flag = state_data.get('ui_confirm_on_exit', self.confirm_on_exit_flag)
         self.start_minimized_flag = state_data.get('ui_start_minimized', self.start_minimized_flag)
         self.show_speed_in_title_flag = state_data.get('ui_show_speed_in_title', self.show_speed_in_title_flag)
+
+        # Restore search sources
+        self.search_sources = state_data.get('search_sources', [])
 
         # Restore torrent client settings
         client_settings_json = state_data.get('client_settings', {})
@@ -214,6 +218,9 @@ class MainWindow(QMainWindow):
         state_data['ui_confirm_on_exit'] = self.confirm_on_exit_flag
         state_data['ui_start_minimized'] = self.start_minimized_flag
         state_data['ui_show_speed_in_title'] = self.show_speed_in_title_flag
+
+        # Save search sources
+        state_data['search_sources'] = self.search_sources
 
         # Save torrent client settings from libtorrent session settings
         # These will be saved with string keys for JSON compatibility
@@ -433,7 +440,7 @@ class MainWindow(QMainWindow):
         
     def setup_search_tab(self):
         """Setup the search tab"""
-        self.search_tab = SearchTab(self.search_engine)
+        self.search_tab = SearchTab(self.search_engine, self.search_sources)
         # Placeholder for search tab icon: search_icon.png
         search_icon_path = os.path.join(os.path.dirname(__file__), "icons", "search_icon.png")
         search_tab_icon = QIcon(search_icon_path) if os.path.exists(search_icon_path) else self.style().standardIcon(QStyle.SP_FileDialogContentsView)
@@ -705,6 +712,9 @@ class MainWindow(QMainWindow):
             self.show_speed_in_title_flag
         )
 
+        # Populate search sources
+        self.settings_dialog.populate_search_sources(self.search_sources)
+
         # Populate client settings from TorrentClient (Connection & Advanced tabs)
         current_client_settings_pack = self.torrent_client.get_session_settings() # Returns settings_pack
         self.settings_dialog.populate_client_settings(current_client_settings_pack)
@@ -726,9 +736,16 @@ class MainWindow(QMainWindow):
             self.start_minimized_flag = interface_settings['start_minimized']
             self.show_speed_in_title_flag = interface_settings['show_speed_in_title']
             
+            # Get and save search sources
+            self.search_sources = self.settings_dialog.get_search_sources()
+            
             # Apply new client settings to TorrentClient
             new_client_settings_dict = self.settings_dialog.get_client_settings() # Returns dict with lt.settings_pack keys
             self.torrent_client.apply_session_settings(new_client_settings_dict)
+
+            # Update SearchTab with new sources
+            if hasattr(self, 'search_tab') and self.search_tab:
+                self.search_tab.update_search_sources(self.search_sources)
             
             self.save_app_state() 
 
@@ -979,7 +996,7 @@ class MainWindow(QMainWindow):
             QMessageBox QPushButton:hover {
                 background-color: #005C99;
             }
-            QMessageBox QPushButton:pressed {
+            QPushButton:pressed {
                 background-color: #004C80;
             }
             /* Style for DestructiveRole button (Remove and Delete Files) */

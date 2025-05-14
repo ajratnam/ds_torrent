@@ -1,7 +1,8 @@
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                             QSpinBox, QPushButton, QLineEdit, QFileDialog,
                             QTabWidget, QWidget, QGroupBox, QFormLayout,
-                            QCheckBox, QComboBox, QListWidget, QStackedWidget, QListWidgetItem, QSplitter)
+                            QCheckBox, QComboBox, QListWidget, QStackedWidget, QListWidgetItem, QSplitter,
+                            QInputDialog)
 from PyQt5.QtCore import Qt, QSize
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QStyle
@@ -52,6 +53,10 @@ class SettingsDialog(QDialog):
         self.page_advanced = QWidget()
         self.setup_advanced_page(self.page_advanced)
         self.settings_stack.addWidget(self.page_advanced)
+
+        self.page_search_sources = QWidget()
+        self.setup_search_sources_page(self.page_search_sources)
+        self.settings_stack.addWidget(self.page_search_sources)
         
         # Populate category list
         icons_base_path = os.path.join(os.path.dirname(__file__), "icons")
@@ -79,6 +84,14 @@ class SettingsDialog(QDialog):
             else: self.item_advanced.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         except: self.item_advanced.setIcon(self.style().standardIcon(QStyle.SP_FileDialogDetailedView))
         self.category_list.addItem(self.item_advanced)
+
+        self.item_search_sources = QListWidgetItem("Search Sources")
+        try:
+            icon_search = QIcon(os.path.join(icons_base_path, "settings_search.png"))
+            if not icon_search.isNull(): self.item_search_sources.setIcon(icon_search)
+            else: self.item_search_sources.setIcon(self.style().standardIcon(QStyle.SP_SearchFocalPoint))
+        except: self.item_search_sources.setIcon(self.style().standardIcon(QStyle.SP_SearchFocalPoint))
+        self.category_list.addItem(self.item_search_sources)
 
         self.category_list.setIconSize(QSize(20, 20))
         self.category_list.currentRowChanged.connect(self.settings_stack.setCurrentIndex)
@@ -209,6 +222,68 @@ class SettingsDialog(QDialog):
         layout.addWidget(bt_group)
         layout.addStretch()
         
+    def setup_search_sources_page(self, page_widget):
+        """Setup search sources settings page."""
+        layout = QVBoxLayout(page_widget)
+        
+        search_sources_group = QGroupBox("Manage Search Source Websites")
+        group_layout = QVBoxLayout(search_sources_group)
+        
+        self.search_sources_list_widget = QListWidget()
+        self.search_sources_list_widget.setAlternatingRowColors(True)
+        group_layout.addWidget(self.search_sources_list_widget)
+        
+        buttons_layout = QHBoxLayout()
+        self.add_source_button = QPushButton("Add Source")
+        self.add_source_button.setIcon(self.style().standardIcon(QStyle.SP_FileDialogNewFolder))
+        self.add_source_button.clicked.connect(self.add_search_source)
+        
+        self.remove_source_button = QPushButton("Remove Source")
+        self.remove_source_button.setIcon(self.style().standardIcon(QStyle.SP_TrashIcon))
+        self.remove_source_button.clicked.connect(self.remove_search_source)
+        
+        buttons_layout.addStretch()
+        buttons_layout.addWidget(self.add_source_button)
+        buttons_layout.addWidget(self.remove_source_button)
+        group_layout.addLayout(buttons_layout)
+        
+        layout.addWidget(search_sources_group)
+        layout.addStretch()
+
+    def add_search_source(self):
+        """Open dialog to add a new search source URL."""
+        url, ok = QInputDialog.getText(self, "Add Search Source", "Enter website URL:", QLineEdit.Normal, "")
+        if ok and url:
+            if url.strip() and (url.startswith("http://") or url.startswith("https://")):
+                items = [self.search_sources_list_widget.item(i).text() for i in range(self.search_sources_list_widget.count())]
+                if url not in items:
+                    self.search_sources_list_widget.addItem(url)
+                else:
+                    print(f"Source '{url}' already exists.")
+            else:
+                print(f"Invalid URL format: '{url}'. Must start with http:// or https://")
+
+    def remove_search_source(self):
+        """Remove the selected search source URL."""
+        selected_items = self.search_sources_list_widget.selectedItems()
+        if not selected_items:
+            return
+        for item in selected_items:
+            self.search_sources_list_widget.takeItem(self.search_sources_list_widget.row(item))
+
+    def populate_search_sources(self, sources_list):
+        """Populate the search sources list widget."""
+        self.search_sources_list_widget.clear()
+        if sources_list:
+            self.search_sources_list_widget.addItems(sources_list)
+
+    def get_search_sources(self):
+        """Return a list of search source URLs."""
+        sources = []
+        for i in range(self.search_sources_list_widget.count()):
+            sources.append(self.search_sources_list_widget.item(i).text())
+        return sources
+
     def populate_interface_settings(self, confirm_on_exit, start_minimized, show_speed_in_title):
         """Populate the interface settings checkboxes."""
         self.confirm_on_exit_check.setChecked(confirm_on_exit)
